@@ -1,0 +1,10 @@
+# Backend-only Docker ignore file for independent backend builds.
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.env
+.env.*
+data/*
+!data/.gitkeep
+

@@ -1,0 +1,16 @@
+# Keep Docker build contexts small and free of local-only artifacts.
+.git/
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+node_modules/
+frontend/node_modules/
+frontend/dist/
+.env
+.env.*
+*.log
+*.db
+*.sqlite
+*.sqlite3
+

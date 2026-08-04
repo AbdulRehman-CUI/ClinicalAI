@@ -1,0 +1,32 @@
+# Python virtual environments and dependency caches.
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Local environment files must never be committed.
+.env
+.env.*
+!.env.example
+
+# SQLite development databases and runtime data.
+*.db
+*.sqlite
+*.sqlite3
+backend/data/*
+!backend/data/.gitkeep
+
+# Frontend dependencies and build output.
+node_modules/
+frontend/node_modules/
+frontend/dist/
+*.tsbuildinfo
+frontend/vite.config.js
+frontend/vite.config.d.ts
+
+# Logs and local OS/editor files.
+*.log
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

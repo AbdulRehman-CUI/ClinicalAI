@@ -1,0 +1,45 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: docker/backend/Dockerfile
+    env_file:
+      - .env
+    environment:
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+      BACKEND_HOST: ${BACKEND_HOST:-0.0.0.0}
+      BACKEND_PORT: ${BACKEND_PORT:-8000}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      DATABASE_URL: ${DATABASE_URL:-sqlite:///./backend/data/clinicalai.db}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-change-me-in-production}
+      SECRET_KEY: ${SECRET_KEY:-change-me-in-production}
+      #CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173,http://localhost:3000}
+      CORS_ORIGINS: ${CORS_ORIGINS:-["http://localhost:5173","http://localhost:3000"]}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:5173}
+      UPLOAD_DIRECTORY: ${UPLOAD_DIRECTORY:-backend/data/uploads}
+      ALLOWED_FILE_TYPES: ${ALLOWED_FILE_TYPES:-["PDF","DOCX","TXT","PNG","JPG","JPEG"]}
+      MAX_UPLOAD_SIZE: ${MAX_UPLOAD_SIZE:-20}
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    volumes:
+      - backend_data:/app/backend/data
+      - uploads_data:/app/backend/data/uploads
+
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/frontend/Dockerfile
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-/api/v1}
+    env_file:
+      - .env
+    environment:
+      VITE_API_BASE_URL: ${VITE_API_BASE_URL:-/api/v1}
+    ports:
+      - "${FRONTEND_PORT:-5173}:80"
+    depends_on:
+      - backend
+
+volumes:
+  backend_data:
+  uploads_data:

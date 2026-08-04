@@ -1,0 +1,7 @@
+# Frontend-only Docker ignore file for independent frontend builds.
+node_modules/
+dist/
+.env
+.env.*
+*.log
+
