@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from enum import Enum
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 
 class Role(str, Enum):
@@ -23,6 +23,14 @@ class UserRegisterRequest(BaseModel):
     email: EmailStr
     password: str = Field(min_length=8, max_length=255)
     role: Role = Role.STAFF
+
+    @field_validator("password")
+    @classmethod
+    def validate_password_bytes(cls, value: str) -> str:
+        """Reject bcrypt truncation for new passwords, including multibyte input."""
+        if len(value.encode("utf-8")) > 72:
+            raise ValueError("Password must be at most 72 UTF-8 bytes.")
+        return value
 
 
 class UserLoginRequest(BaseModel):
@@ -60,13 +68,5 @@ class UserRead(BaseModel):
     updated_at: datetime
 
 
-class AuthUser(BaseModel):
+class AuthUser(UserRead):
     """Authenticated user context for dependency injection."""
-
-    model_config = ConfigDict(from_attributes=True)
-
-    id: int
-    full_name: str
-    email: str
-    role: str
-    is_active: bool

@@ -105,11 +105,23 @@ export interface AIAnalysisRead {
   created_at: string;
 }
 
-export interface AnalysisResult extends AIAnalysisRead {
+export type AnalysisValue =
+  | string
+  | number
+  | boolean
+  | null
+  | AnalysisValue[]
+  | { [key: string]: AnalysisValue };
+
+// The analyze endpoint returns the validated provider output, not the stored analysis schema.
+export interface AnalysisResult {
   analysis_id: number;
-  critical_alerts: string[];
-  recommended_tests: string[];
+  patient_id: number;
+  report_id?: number | null;
+  possible_diagnoses: AnalysisValue[];
+  medication_warnings: AnalysisValue[];
+  critical_alerts: AnalysisValue[];
+  recommended_tests: AnalysisValue[];
   recommended_specialist: string;
   summary: string;
 }
-

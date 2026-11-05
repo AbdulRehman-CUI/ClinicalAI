@@ -139,7 +139,7 @@ async def validation_exception_handler(
     exc: RequestValidationError,
 ) -> JSONResponse:
     """Convert FastAPI validation failures into the documented error envelope."""
-    logger.warning("Validation error on %s %s: %s", request.method, request.url.path, exc.errors())
+    logger.warning("Validation error on %s %s (fields: %s)", request.method, request.url.path, [error.get("loc") for error in exc.errors()])
     errors: dict[str, list[str]] = {}
     for error in exc.errors():
         field_name = ".".join(str(part) for part in error.get("loc", ("body",)))
@@ -162,6 +162,7 @@ async def http_exception_handler(request: Request, exc: HTTPException) -> JSONRe
     logger.warning("HTTP error on %s %s: %s", request.method, request.url.path, exc.detail)
     return JSONResponse(
         status_code=exc.status_code,
+        headers=exc.headers,
         content={
             "success": False,
             "message": str(exc.detail),

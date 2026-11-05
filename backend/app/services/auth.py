@@ -10,13 +10,13 @@ import jwt
 from fastapi import Depends, Header, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 
 from app.core.config import get_settings
 from app.db.models import User
 from app.db.session import get_db
 from app.repositories.user import UserRepository
 from app.schemas.auth import AuthUser, Role, TokenRefreshRequest, TokenResponse, UserLoginRequest, UserRead, UserRegisterRequest
-from app.services.exceptions import ResourceNotFoundError, ValidationError
 
 settings = get_settings()
 
@@ -34,51 +34,53 @@ class AuthService:
     def register(self, payload: UserRegisterRequest) -> TokenResponse:
         """Register a new user and issue initial tokens."""
         if self.user_repository.get_by_email(payload.email.lower()) is not None:
-            raise ValidationError("Email already registered.")
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered.")
 
         hashed_password = self._hash_password(payload.password)
-        user = self.user_repository.create(
-            {
-                "full_name": payload.full_name,
-                "email": payload.email.lower(),
-                "hashed_password": hashed_password,
-                "role": payload.role.value,
-                "is_active": True,
-            }
-        )
+        try:
+            user = self.user_repository.create(
+                {
+                    "full_name": payload.full_name,
+                    "email": payload.email.lower(),
+                    "hashed_password": hashed_password,
+                    "role": payload.role.value,
+                    "is_active": True,
+                }
+            )
+        except IntegrityError:
+            self.user_repository.db.rollback()
+            if self.user_repository.get_by_email(payload.email.lower()) is not None:
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered.") from None
+            raise
         return self._issue_tokens(user)
 
     def login(self, payload: UserLoginRequest) -> TokenResponse:
         """Authenticate a user and issue tokens."""
         user = self.user_repository.get_by_email(payload.email.lower())
         if user is None or not self._verify_password(payload.password, user.hashed_password):
-            raise ValidationError("Invalid email or password.")
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password.", headers={"WWW-Authenticate": "Bearer"})
         if not user.is_active:
-            raise ValidationError("User account is disabled.")
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User account is disabled.")
         return self._issue_tokens(user)
 
     def refresh(self, payload: TokenRefreshRequest) -> TokenResponse:
         """Refresh access and refresh tokens using a valid refresh token."""
-        try:
-            claims = jwt.decode(
-                payload.refresh_token,
-                settings.jwt_secret_key,
-                algorithms=[settings.jwt_algorithm],
-                options={"require": ["sub", "type", "exp"]},
-            )
-        except jwt.PyJWTError as exc:
-            raise ValidationError("Invalid refresh token.") from exc
-
-        if claims.get("type") != "refresh":
-            raise ValidationError("Invalid refresh token type.")
-
-        user = self.user_repository.get(int(claims["sub"]))
+        user_id = self._decode_user_id(payload.refresh_token, "refresh")
+        user = self.user_repository.get(user_id)
         if user is None or not user.is_active:
-            raise ValidationError("User account is disabled.")
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not active", headers={"WWW-Authenticate": "Bearer"})
         return self._issue_tokens(user)
 
     def get_current_user(self, token: str) -> AuthUser:
         """Decode a JWT and return the authenticated user context."""
+        user_id = self._decode_user_id(token, "access")
+        user = self.user_repository.get(user_id)
+        if user is None or not user.is_active:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not active", headers={"WWW-Authenticate": "Bearer"})
+        return AuthUser.model_validate(user)
+
+    def _decode_user_id(self, token: str, token_type: str) -> int:
+        """Validate both token purpose and subject before querying the database."""
         try:
             claims = jwt.decode(
                 token,
@@ -86,16 +88,15 @@ class AuthService:
                 algorithms=[settings.jwt_algorithm],
                 options={"require": ["sub", "type", "exp"]},
             )
-        except jwt.PyJWTError as exc:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token") from exc
-
-        if claims.get("type") != "access":
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token type")
-
-        user = self.user_repository.get(int(claims["sub"]))
-        if user is None or not user.is_active:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not active")
-        return AuthUser.model_validate(user)
+            subject = claims["sub"]
+            if claims.get("type") != token_type or not isinstance(subject, str) or not subject.isascii() or not subject.isdigit():
+                raise ValueError("Invalid token claims")
+            user_id = int(subject)
+            if not 0 < user_id <= 9223372036854775807:
+                raise ValueError("Invalid user identifier")
+            return user_id
+        except (jwt.PyJWTError, ValueError, TypeError) as exc:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token", headers={"WWW-Authenticate": "Bearer"}) from exc
 
     def require_role(self, *allowed_roles: Role) -> Any:
         """Build a dependency that ensures the current user has one of the allowed roles."""
@@ -139,7 +140,12 @@ class AuthService:
 
     def _verify_password(self, password: str, hashed_password: str) -> bool:
         """Verify a password against a stored bcrypt hash."""
-        return bcrypt.checkpw(password.encode("utf-8"), hashed_password.encode("utf-8"))
+        try:
+            # Older bcrypt accepted long passwords by truncating to 72 bytes.
+            # Keep those existing hashes usable without changing stored credentials.
+            return bcrypt.checkpw(password.encode("utf-8")[:72], hashed_password.encode("utf-8"))
+        except (ValueError, TypeError):
+            return False
 
 
 def get_auth_service(db: Session = Depends(get_db)) -> AuthService:

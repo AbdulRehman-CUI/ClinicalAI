@@ -1,71 +1,183 @@
-import { Activity, Home, LogOut, LogIn, UserPlus } from "lucide-react";
-import { NavLink, Outlet } from "react-router-dom";
-
+import { useEffect, useRef, useState } from "react";
+import {
+  Activity,
+  ArrowUpRight,
+  ChevronRight,
+  LayoutDashboard,
+  LogIn,
+  LogOut,
+  Menu,
+  Stethoscope,
+  UserPlus,
+  X,
+} from "lucide-react";
+import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
-
-const navItems = [
-  { to: "/", label: "Home", icon: Home },
-  { to: "/status", label: "Status", icon: Activity },
-];
+import { Brand } from "./WorkspaceUI";
 
 export function Layout() {
   const { isAuthenticated, user, logout } = useAuth();
-
+  const { pathname } = useLocation();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const main = useRef<HTMLElement>(null);
+  const previousPath = useRef(pathname);
+  useEffect(() => {
+    setMenuOpen(false);
+    if (previousPath.current !== pathname) {
+      main.current?.focus({ preventScroll: true });
+      window.scrollTo(0, 0);
+      previousPath.current = pathname;
+    }
+  }, [pathname]);
+  useEffect(() => {
+    if (!menuOpen) return;
+    function close(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setMenuOpen(false);
+        document.getElementById("menu-toggle")?.focus();
+      }
+    }
+    window.addEventListener("keydown", close);
+    return () => window.removeEventListener("keydown", close);
+  }, [menuOpen]);
+  const authPage = pathname === "/login" || pathname === "/register";
   return (
-    <div className="min-h-screen bg-zinc-50 text-zinc-950">
-      <header className="border-b border-zinc-200 bg-white">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-4">
-          <div>
-            <p className="text-sm font-medium text-teal-700">ClinicalAI</p>
-            <h1 className="text-xl font-semibold">Project Foundation</h1>
-          </div>
-          <nav className="flex flex-wrap items-center gap-2" aria-label="Primary navigation">
-            {navItems.map(({ to, label, icon: Icon }) => (
-              <NavLink
-                key={to}
-                to={to}
-                className={({ isActive }) =>
-                  [
-                    "inline-flex h-10 items-center gap-2 rounded-md px-3 text-sm font-medium transition",
-                    isActive
-                      ? "bg-teal-700 text-white"
-                      : "text-zinc-700 hover:bg-zinc-100 hover:text-zinc-950",
-                  ].join(" ")
-                }
+    <div className={`app-shell ${authPage ? "auth-shell" : ""}`}>
+      <a className="skip-link" href="#main-content">
+        Skip to content
+      </a>
+      <header className="app-header">
+        <NavLink
+          to={isAuthenticated ? "/" : "/login"}
+          aria-label="ClinicalAI home"
+          className="brand-link"
+        >
+          <Brand />
+        </NavLink>
+        <div className="header-divider" />
+        <span className="workspace-label">
+          Clinical workspace
+          <ChevronRight size={13} />
+          <span>
+            {authPage
+              ? "Account access"
+              : pathname === "/status"
+                ? "System health"
+                : "Patient intake"}
+          </span>
+        </span>
+        <div className="header-account">
+          {isAuthenticated ? (
+            <>
+              <span className="avatar">
+                {(user?.full_name || user?.email || "C")
+                  .slice(0, 1)
+                  .toUpperCase()}
+              </span>
+              <span className="account-name">
+                {user?.full_name || user?.email}
+                <small>{user?.role}</small>
+              </span>
+              <button
+                className="icon-button logout-button"
+                type="button"
+                onClick={logout}
+                aria-label="Log out"
+                title="Log out"
               >
-                <Icon className="h-4 w-4" aria-hidden="true" />
-                <span>{label}</span>
-              </NavLink>
-            ))}
-            {isAuthenticated ? (
-              <>
-                <span className="rounded-full bg-zinc-100 px-3 py-2 text-sm text-zinc-700">
-                  {user?.full_name || user?.email || "Signed in"}
-                </span>
-                <button className="inline-flex h-10 items-center gap-2 rounded-md px-3 text-sm font-medium text-zinc-700 transition hover:bg-zinc-100" onClick={logout} type="button">
-                  <LogOut className="h-4 w-4" />
-                  <span>Logout</span>
-                </button>
-              </>
-            ) : (
-              <>
-                <NavLink className="inline-flex h-10 items-center gap-2 rounded-md px-3 text-sm font-medium text-zinc-700 transition hover:bg-zinc-100" to="/login">
-                  <LogIn className="h-4 w-4" />
-                  <span>Login</span>
-                </NavLink>
-                <NavLink className="inline-flex h-10 items-center gap-2 rounded-md px-3 text-sm font-medium text-zinc-700 transition hover:bg-zinc-100" to="/register">
-                  <UserPlus className="h-4 w-4" />
-                  <span>Register</span>
-                </NavLink>
-              </>
-            )}
-          </nav>
+                <LogOut size={18} />
+                <span>Log out</span>
+              </button>
+            </>
+          ) : (
+            <span className="header-tag">
+              <Stethoscope size={16} />
+              Built for clinical clarity
+            </span>
+          )}
         </div>
+        <button
+          id="menu-toggle"
+          type="button"
+          className="icon-button menu-toggle"
+          onClick={() => setMenuOpen(!menuOpen)}
+          aria-expanded={menuOpen}
+          aria-controls="primary-navigation"
+          aria-label={menuOpen ? "Close navigation" : "Open navigation"}
+        >
+          {menuOpen ? <X size={21} /> : <Menu size={21} />}
+        </button>
       </header>
-      <main className="mx-auto max-w-6xl px-4 py-8">
-        <Outlet />
+      <aside
+        id="primary-navigation"
+        className={`sidebar ${menuOpen ? "sidebar-open" : ""}`}
+      >
+        <div className="sidebar-section-label">WORKSPACE</div>
+        <nav aria-label="Primary navigation">
+          {(isAuthenticated
+            ? [
+                { to: "/", label: "Patient workspace", icon: LayoutDashboard },
+                { to: "/status", label: "System health", icon: Activity },
+              ]
+            : [
+                { to: "/login", label: "Sign in", icon: LogIn },
+                { to: "/register", label: "Create account", icon: UserPlus },
+              ]
+          ).map(({ to, label, icon: Icon }) => (
+            <NavLink
+              end
+              key={to}
+              to={to}
+              className={({ isActive }) =>
+                `nav-item ${isActive ? "nav-active" : ""}`
+              }
+            >
+              <Icon size={18} />
+              <span>{label}</span>
+              <ChevronRight className="nav-arrow" size={14} />
+            </NavLink>
+          ))}
+        </nav>
+        <div className="sidebar-note">
+          <span className="icon-tile">
+            <Stethoscope size={20} />
+          </span>
+          <h3>Care, with context.</h3>
+          <p>
+            Bring patient information together for better-informed clinical
+            decisions.
+          </p>
+          <span className="sidebar-note-caption">
+            AI-assisted decision support
+            <ArrowUpRight size={13} />
+          </span>
+        </div>
+        <div className="sidebar-footer">
+          <span className="mini-brand">
+            C<span>+</span>
+          </span>
+          <span>
+            ClinicalAI<small>Clarity at every step.</small>
+          </span>
+        </div>
+      </aside>
+      {menuOpen ? (
+        <button
+          type="button"
+          className="nav-scrim"
+          aria-label="Close navigation"
+          onClick={() => setMenuOpen(false)}
+        />
+      ) : null}
+      <main ref={main} id="main-content" tabIndex={-1} className="main-content">
+        <div key={pathname} className="route-transition">
+          <Outlet />
+        </div>
+        <footer className="page-footer">
+          <span>ClinicalAI · Clinical decision support</span>
+          <span>Designed to support your clinical judgment.</span>
+        </footer>
       </main>
     </div>
   );
 }
-

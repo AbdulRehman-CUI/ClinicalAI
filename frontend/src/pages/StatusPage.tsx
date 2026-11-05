@@ -1,94 +1,194 @@
-import { Activity, Database, HardDrive, Server, Sparkles } from "lucide-react";
+import {
+  Activity,
+  ArrowRight,
+  BrainCircuit,
+  Database,
+  HardDrive,
+  Info,
+  RefreshCw,
+  Server,
+} from "lucide-react";
 import { useState } from "react";
-import toast from "react-hot-toast";
-
 import { getApiErrorMessage, getHealthStatus } from "../api";
+import { Badge, Button, CardHeading, Reveal } from "../components/WorkspaceUI";
 
-type HealthPanel = {
-  label: string;
-  value: string;
-  detail: string;
-  isHealthy: boolean;
-  icon: typeof Activity;
-};
-
+type ConnectionState =
+  "unchecked" | "checking" | "healthy" | "unknown" | "unavailable";
 export function StatusPage() {
-  const [status, setStatus] = useState<string>("Not checked");
-  const [detail, setDetail] = useState<string>("Run the health check to verify the backend connection.");
-  const [panels, setPanels] = useState<HealthPanel[]>([
-    { label: "Backend", value: "Pending", detail: "Awaiting health check", isHealthy: false, icon: Server },
-    { label: "Database", value: "SQLite", detail: "Configured for local persistence", isHealthy: true, icon: Database },
-    { label: "AI Provider", value: import.meta.env.VITE_AI_PROVIDER || "OpenAI", detail: "Configured via frontend environment", isHealthy: true, icon: Sparkles },
-    { label: "Upload Folder", value: import.meta.env.VITE_UPLOAD_FOLDER || "backend/data/uploads", detail: "Managed by backend storage settings", isHealthy: true, icon: HardDrive },
-    { label: "API Version", value: import.meta.env.VITE_API_VERSION || "0.1.0", detail: "Backend API version", isHealthy: true, icon: Activity },
-  ]);
-  const [isLoading, setIsLoading] = useState(false);
-
+  const [state, setState] = useState<ConnectionState>("unchecked");
+  const [detail, setDetail] = useState(
+    "Run a health check to verify the backend connection.",
+  );
+  const [checkedAt, setCheckedAt] = useState<string | null>(null);
+  const isLoading = state === "checking";
   async function checkBackendStatus() {
-    setIsLoading(true);
+    setState("checking");
     try {
       const response = await getHealthStatus();
-      const nextStatus = response.data?.status ?? "Unknown";
-      setStatus(nextStatus);
-      setDetail(response.message || "Backend connection is healthy.");
-      setPanels((current) => current.map((panel) => (panel.label === "Backend" ? { ...panel, value: nextStatus, detail: response.message || "Backend responded successfully", isHealthy: nextStatus === "ok" } : panel)));
-      toast.success(response.message || "Backend connection is healthy.");
+      if (!response.success)
+        throw new Error(
+          response.message || "Backend reported an unsuccessful check.",
+        );
+      const healthy = response.data?.status === "ok";
+      setState(healthy ? "healthy" : "unknown");
+      setDetail(
+        response.message ||
+          (healthy
+            ? "Backend responded successfully."
+            : "The backend responded without a confirmed healthy status."),
+      );
     } catch (error) {
-      const message = getApiErrorMessage(error, "Backend status check failed.");
-      setStatus("Unavailable");
-      setDetail(message);
-      setPanels((current) => current.map((panel) => (panel.label === "Backend" ? { ...panel, value: "Unavailable", detail: message, isHealthy: false } : panel)));
-      toast.error(message);
+      setState("unavailable");
+      setDetail(getApiErrorMessage(error, "Backend status check failed."));
     } finally {
-      setIsLoading(false);
+      setCheckedAt(new Date().toLocaleTimeString());
     }
   }
-
+  const label = {
+    unchecked: "Not checked",
+    checking: "Checking…",
+    healthy: "Connection healthy",
+    unknown: "Status unverified",
+    unavailable: "Connection unavailable",
+  }[state];
+  const tone =
+    state === "healthy"
+      ? "success"
+      : state === "unavailable"
+        ? "error"
+        : "warning";
+  const panels = [
+    {
+      label: "Backend connection",
+      icon: Server,
+      value: label,
+      detail: "Verified only by the latest health endpoint response.",
+      badge:
+        state === "healthy"
+          ? "Verified healthy"
+          : state === "unavailable"
+            ? "Unavailable"
+            : isLoading
+              ? "Pending"
+              : "Unverified",
+      tone,
+    },
+    {
+      label: "Database",
+      icon: Database,
+      value: "Managed by backend",
+      detail: "The health endpoint does not test database connectivity.",
+      badge: "Unverified",
+      tone: "warning",
+    },
+    {
+      label: "AI provider",
+      icon: BrainCircuit,
+      value: import.meta.env.VITE_AI_PROVIDER || "Not exposed",
+      detail: import.meta.env.VITE_AI_PROVIDER
+        ? "Frontend configuration hint; provider availability has not been tested."
+        : "Provider configuration is managed by the backend and is not returned by this check.",
+      badge: import.meta.env.VITE_AI_PROVIDER
+        ? "Configured · unverified"
+        : "Unverified",
+      tone: "warning",
+    },
+    {
+      label: "Upload storage",
+      icon: HardDrive,
+      value: import.meta.env.VITE_UPLOAD_FOLDER || "Managed by backend",
+      detail:
+        "Storage availability and write access are not tested by this endpoint.",
+      badge: "Unverified",
+      tone: "warning",
+    },
+    {
+      label: "API version",
+      icon: Activity,
+      value: import.meta.env.VITE_API_VERSION || "Not reported",
+      detail:
+        "Only an explicitly configured frontend version is shown; the health response does not return a version.",
+      badge: import.meta.env.VITE_API_VERSION
+        ? "Configuration hint"
+        : "Not reported",
+      tone: "neutral",
+    },
+  ] as const;
   return (
-    <section className="space-y-6 rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+    <div className="status-page">
+      <div className="page-title-row">
+        <div className="eyebrow">
+          <span className="eyebrow-line" />
+          WORKSPACE OPERATIONS
+        </div>
+        <Badge>System overview</Badge>
+      </div>
+      <div className="status-title">
         <div>
-          <h2 className="text-xl font-semibold text-zinc-950">System health dashboard</h2>
-          <p className="mt-2 text-sm text-zinc-600">Monitor the backend and supporting services for the clinical workflow.</p>
+          <h1>
+            Confidence starts
+            <br className="mobile-break" /> with connection.
+          </h1>
+          <p>A transparent view of your backend and supporting services.</p>
         </div>
-        <button
-          type="button"
-          onClick={checkBackendStatus}
-          disabled={isLoading}
-          className="h-10 rounded-md bg-teal-700 px-4 text-sm font-medium text-white transition hover:bg-teal-800 disabled:cursor-not-allowed disabled:bg-zinc-400"
-        >
-          {isLoading ? "Checking" : "Check status"}
-        </button>
+        <Button onClick={checkBackendStatus} busy={isLoading}>
+          <RefreshCw size={16} />
+          {isLoading ? "Checking backend…" : "Run health check"}
+          <ArrowRight size={16} />
+        </Button>
       </div>
-
-      <div className="mt-6 rounded-lg border border-zinc-200 bg-zinc-50 p-4">
-        <div className="flex items-center gap-2 text-sm font-medium text-zinc-600">
-          <span className={`inline-flex h-3 w-3 rounded-full ${status === "ok" ? "bg-emerald-500" : "bg-amber-500"}`} />
-          <span>Current backend status</span>
+      <section
+        className={`connection-banner connection-${state}`}
+        role="status"
+        aria-live="polite"
+        aria-busy={isLoading}
+      >
+        <span className="connection-symbol">
+          <Server size={24} />
+        </span>
+        <div>
+          <span className="small-caps">BACKEND STATUS</span>
+          <h2>{label}</h2>
+          <p>{detail}</p>
         </div>
-        <p className="mt-2 text-lg font-semibold text-zinc-950">{status}</p>
-        <p className="mt-1 text-sm text-zinc-600">{detail}</p>
+        <div className="last-checked">
+          <Badge tone={tone}>
+            {state === "healthy"
+              ? "Verified"
+              : state === "unavailable"
+                ? "Error"
+                : "Unverified"}
+          </Badge>
+          <small>
+            {checkedAt
+              ? `Last checked at ${checkedAt}`
+              : "No checks performed yet"}
+          </small>
+        </div>
+      </section>
+      <div className="health-grid">
+        {panels.map(({ label, icon, value, detail, badge, tone }, i) => (
+          <Reveal delay={i * 75} key={label}>
+            <section className="panel health-panel">
+              <CardHeading icon={icon} title={label} description="" />
+              <strong className="health-value">{value}</strong>
+              <p>{detail}</p>
+              <Badge tone={tone}>{badge}</Badge>
+            </section>
+          </Reveal>
+        ))}
       </div>
-
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {panels.map((panel) => {
-          const Icon = panel.icon;
-          return (
-            <div key={panel.label} className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 text-sm font-semibold text-zinc-900">
-                  <Icon className="h-4 w-4 text-teal-700" />
-                  {panel.label}
-                </div>
-                <span className={`inline-flex h-2.5 w-2.5 rounded-full ${panel.isHealthy ? "bg-emerald-500" : "bg-amber-500"}`} />
-              </div>
-              <p className="mt-4 text-lg font-semibold text-zinc-950">{panel.value}</p>
-              <p className="mt-2 text-sm text-zinc-600">{panel.detail}</p>
-            </div>
-          );
-        })}
+      <div className="notice status-explanation">
+        <Info size={20} />
+        <div>
+          <strong>Configuration is not a health check.</strong>
+          <p>
+            This endpoint confirms backend responsiveness only. Database, AI
+            provider, and upload storage remain unverified until dedicated
+            service checks are available.
+          </p>
+        </div>
       </div>
-    </section>
+    </div>
   );
 }
-

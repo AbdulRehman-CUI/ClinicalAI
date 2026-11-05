@@ -5,24 +5,17 @@ import sys
 from pathlib import Path
 
 
-def test_alembic_upgrade_head_creates_expected_tables() -> None:
+def test_alembic_upgrade_head_creates_expected_tables(tmp_path: Path) -> None:
     repo_root = Path(__file__).resolve().parents[2]
     backend_dir = repo_root / "backend"
-    db_path = backend_dir / "data" / "clinicalai.db"
-
-    if db_path.exists():
-        try:
-            conn = sqlite3.connect(db_path)
-            conn.close()
-        except sqlite3.Error:
-            pass
+    db_path = tmp_path / "migrations.db"
 
     result = subprocess.run(
         [sys.executable, "-m", "alembic", "-c", "alembic.ini", "upgrade", "head"],
         cwd=backend_dir,
         capture_output=True,
         text=True,
-        env={**os.environ, "PYTHONPATH": str(backend_dir)},
+        env={**os.environ, "PYTHONPATH": str(backend_dir), "DATABASE_URL": f"sqlite:///{db_path.as_posix()}"},
         check=False,
     )
 
@@ -45,6 +38,7 @@ def test_alembic_upgrade_head_creates_expected_tables() -> None:
         "medical_reports",
         "ai_analyses",
         "alembic_version",
+        "users",
     }
 
     assert expected_tables.issubset(tables)

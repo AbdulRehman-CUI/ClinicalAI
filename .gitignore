@@ -1,5 +1,6 @@
 # Python virtual environments and dependency caches.
 .venv/
+.venv.backup*/
 __pycache__/
 *.py[cod]
 .pytest_cache/
@@ -20,6 +21,8 @@ backend/data/*
 node_modules/
 frontend/node_modules/
 frontend/dist/
+frontend/test-results/
+frontend/playwright-report/
 *.tsbuildinfo
 frontend/vite.config.js
 frontend/vite.config.d.ts

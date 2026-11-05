@@ -16,21 +16,6 @@ export function getStoredRefreshToken() {
   return window.sessionStorage.getItem(REFRESH_TOKEN_KEY);
 }
 
-export function getStoredUser() {
-  if (typeof window === "undefined") {
-    return null;
-  }
-  const rawValue = window.sessionStorage.getItem(USER_KEY);
-  if (!rawValue) {
-    return null;
-  }
-  try {
-    return JSON.parse(rawValue);
-  } catch {
-    return null;
-  }
-}
-
 export function setStoredAuthState(accessToken: string, refreshToken: string, user: unknown) {
   if (typeof window === "undefined") {
     return;
