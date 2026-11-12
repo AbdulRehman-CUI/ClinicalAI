@@ -9,10 +9,33 @@ export const apiClient = axios.create({
   },
 });
 
-let workspaceReady: Promise<unknown> | undefined;
+const WORKSPACE_TIMEOUT_MS = 12_000;
+let workspaceReady: Promise<void> | undefined;
 
 function isPublicRequest(url?: string) {
   return url === "/workspace" || url === "/health" || url === "/llm/providers";
+}
+
+async function initializeWorkspace() {
+  // Axios's request timeout starts after the browser grants the lock.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), WORKSPACE_TIMEOUT_MS);
+  try {
+    const initialize = async () => {
+      const response = await apiClient.post("/workspace", undefined, { signal: controller.signal });
+      if (response.status !== 204) throw new Error("The workspace endpoint returned an unexpected response.");
+    };
+    if (navigator.locks) {
+      await navigator.locks.request("clinicalai-workspace", { signal: controller.signal }, initialize);
+    } else {
+      await initialize();
+    }
+  } catch (error) {
+    if (controller.signal.aborted) throw new Error("Workspace setup timed out. Please try again.");
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 apiClient.interceptors.request.use(async (request) => {
@@ -21,13 +44,7 @@ apiClient.interceptors.request.use(async (request) => {
   }
   if (isPublicRequest(request.url)) return request;
   if (!workspaceReady) {
-    const initialize = async () => {
-      const response = await apiClient.post("/workspace");
-      if (response.status !== 204) throw new Error("The workspace endpoint returned an unexpected response.");
-    };
-    workspaceReady = (navigator.locks
-      ? navigator.locks.request("clinicalai-workspace", initialize)
-      : initialize()).catch((error: unknown) => {
+    workspaceReady = initializeWorkspace().catch((error: unknown) => {
       workspaceReady = undefined;
       throw error;
     });
@@ -53,6 +70,10 @@ export function getApiErrorMessage(
         ? "The request timed out. Please try again."
         : "Unable to connect to ClinicalAI. Check your connection and try again.";
     }
+    if (error.response.status === 500 && typeof error.response.data === "string"
+      && error.response.data.includes("FUNCTION_INVOCATION_FAILED")) {
+      return "The deployed ClinicalAI API failed to start or respond. Contact your administrator.";
+    }
     const responseData = error.response?.data as
       | {
           message?: string;
@@ -61,7 +82,9 @@ export function getApiErrorMessage(
           detail?: string | { msg?: string; loc?: (string | number)[] }[];
         }
       | undefined;
-    if (responseData?.error?.startsWith("llm_") && responseData.message) {
+    if (typeof responseData?.error === "string"
+      && /^(llm_|workspace_|database_)/.test(responseData.error)
+      && typeof responseData.message === "string" && responseData.message) {
       return responseData.message;
     }
     if (error.response.status >= 500)
@@ -69,24 +92,24 @@ export function getApiErrorMessage(
 
     const validationMessages = Object.values(responseData?.errors ?? {})
       .flat()
-      .filter((item): item is string => Boolean(item));
+      .filter((item): item is string => typeof item === "string" && Boolean(item));
 
     if (validationMessages.length > 0) {
       return validationMessages.join(" ");
     }
 
-    if (responseData?.message) return responseData.message;
-
-    if (responseData?.error) {
-      return responseData.error;
-    }
+    if (typeof responseData?.message === "string" && responseData.message) return responseData.message;
 
     if (typeof responseData?.detail === "string") return responseData.detail;
     if (Array.isArray(responseData?.detail)) {
       return responseData.detail
         .map(
-          (item) =>
-            `${item.loc?.filter((part) => part !== "body").join(" ") || "Field"}: ${item.msg || "Invalid value"}`,
+          (item) => {
+            const field = Array.isArray(item?.loc)
+              ? item.loc.filter((part) => part !== "body").join(".")
+              : "";
+            return `${field || "Field"}: ${typeof item?.msg === "string" ? item.msg : "Invalid value"}`;
+          },
         )
         .join(" ");
     }

@@ -16,7 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse
 from sqlalchemy import inspect
-from sqlalchemy.exc import OperationalError, TimeoutError as DatabaseTimeoutError
+from sqlalchemy.exc import OperationalError, ProgrammingError, TimeoutError as DatabaseTimeoutError
 from starlette.responses import Response
 
 BACKEND_DIR = str(Path(__file__).resolve().parents[1])
@@ -210,12 +210,28 @@ async def service_exception_handler(request: Request, exc: ServiceError) -> JSON
 
 
 @app.exception_handler(OperationalError)
+@app.exception_handler(ProgrammingError)
 @app.exception_handler(DatabaseTimeoutError)
 async def database_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    original = getattr(exc, "orig", None)
+    missing_schema = getattr(original, "sqlstate", None) in {"42P01", "42703"}
+    if session.sqlite and isinstance(exc, OperationalError):
+        missing_schema = str(original).startswith(("no such table:", "no such column:"))
+    if missing_schema:
+        logger.error("Database schema is incomplete on %s %s. Check Alembic migration head.",
+                     request.method, route_template(request))
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content={"success": False, "error": "database_schema_incomplete",
+                     "message": "The database schema is incomplete. Contact your administrator.", "errors": {}},
+        )
+    if isinstance(exc, ProgrammingError):
+        return await unhandled_exception_handler(request, exc)
     logger.error("Database unavailable on %s %s (%s)", request.method, route_template(request), type(exc).__name__)
     return JSONResponse(
         status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-        content={"success": False, "message": "Database temporarily unavailable.", "errors": {}},
+        content={"success": False, "error": "database_unavailable",
+                 "message": "Database temporarily unavailable. Try again shortly.", "errors": {}},
     )
 
 

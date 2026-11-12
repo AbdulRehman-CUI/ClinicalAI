@@ -2,6 +2,7 @@
 
 from datetime import datetime, timedelta, timezone
 from hashlib import sha256
+import logging
 from secrets import token_urlsafe
 from uuid import uuid4
 
@@ -15,6 +16,7 @@ from app.db.session import get_db
 
 WORKSPACE_TTL = timedelta(days=30)
 router = APIRouter(tags=["workspace"])
+logger = logging.getLogger(__name__)
 
 
 def cookie_name(name: str) -> str:
@@ -72,6 +74,7 @@ def get_workspace(
 @router.post("/workspace", status_code=204, dependencies=[Depends(require_browser_write)])
 def initialize_workspace(request: Request, response: Response, db: Session = Depends(get_db)) -> None:
     if find_workspace(request, db) is not None:
+        logger.info("Guest workspace restored")
         return
     credential = token_urlsafe(32)
     db.add(GuestWorkspace(
@@ -80,3 +83,4 @@ def initialize_workspace(request: Request, response: Response, db: Session = Dep
     ))
     db.commit()
     set_browser_cookie(response, "workspace", credential, int(WORKSPACE_TTL.total_seconds()))
+    logger.info("Guest workspace created")

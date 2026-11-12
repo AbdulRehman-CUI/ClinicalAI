@@ -105,12 +105,16 @@ npx vercel@latest deploy --prod
 
 Use **Deployments → Redeploy** after changing runtime or build-time environment variables. Check `GET /api/v1/health` and `GET /api/v1/llm/providers` before testing the workspace flow. Both return JSON without creating a workspace or using a provider key. If they return `FUNCTION_INVOCATION_FAILED`, check the FastAPI runtime logs for the first import or startup error. Compare the required variable names above against the selected deployment environment. `FRONTEND_URL` must match the browser origin for workspace writes. Then verify that `POST /api/v1/workspace` returns 204 and the following configuration request includes the cookie.
 
+Keep the FastAPI prefix at `/api/v1` for this configuration. The Services rewrite passes the original path to FastAPI. A platform-level 500 from both health and the catalog occurs before a workspace or Neon query can explain the failure. Read the first exception for the failed invocation in **Runtime Logs**. ClinicalAI's startup configuration error lists invalid or missing variable names with sensitive values omitted. [Vercel function invocation errors](https://vercel.com/docs/errors/function_invocation_failed)
+
+If health and the catalog return 200 but workspace creation returns 503 with `database_schema_incomplete`, inspect the target database with `python -m alembic -c backend/alembic.ini current`. The required workspace schema is revision `20261112_0002`. Apply the normal migration to the intended database only after verifying its connection and current revision. A 403 on workspace creation instead points to the exact origin allow-list or the workspace request header.
+
 ## Verify with synthetic records
 
-- Check `/api/v1/health`, `/docs`, `/redoc`, and `/openapi.json` on the backend. Health verifies that the app is serving. Login and patient CRUD verify database connectivity.
+- Check `/api/v1/health`, `/docs`, `/redoc`, and `/openapi.json` on the backend. Health verifies that the app is serving. Guest workspace creation and patient CRUD verify database connectivity.
 - Open and refresh `/`, `/settings/llm`, and `/status` on the frontend. Verify that the API sets a secure workspace cookie and that refresh resumes the same workspace. Open a separate browser profile and verify that it cannot read the first profile's patient IDs or LLM status.
 - Create, read, edit, and delete a synthetic patient. Before deleting the patient, exercise medical history, medication, allergy, and symptom operations.
-- Upload synthetic PDF, DOCX, and TXT reports. Include one between 5 MB and 20 MiB. Verify the browser sends bytes to S3, the backend returns report metadata, and the original is downloadable only through the authorized flow. Try an unsupported file, an oversized file, and another account's upload intent. Delete the reports and confirm object cleanup.
+- Upload synthetic PDF, DOCX, and TXT reports. Include one between 5 MB and 20 MiB. Verify the browser sends bytes to S3, the backend returns report metadata, and the original is downloadable only through the authorized flow. Try an unsupported file, an oversized file, and another workspace's upload intent. Delete the reports and confirm object cleanup.
 - Confirm analysis requires LLM configuration. Enter a dedicated test key, test and save the model, and run a synthetic analysis. Verify persistence, provider failures, and configuration removal. Provider tests may incur charges.
 
 ## Troubleshooting

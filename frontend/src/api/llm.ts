@@ -14,6 +14,7 @@ export type LLMStatus = {
 export type LLMSelection = { provider: Provider; model: string; api_key?: string };
 export const providerNames = { openai: "OpenAI", gemini: "Google Gemini" } as const;
 export type ProviderCatalog = Record<Provider, string[]>;
+const LLM_READ_TIMEOUT_MS = 12_000;
 
 function readStatus(response: ApiResponse<LLMStatus>) {
   const status = response?.data;
@@ -25,12 +26,16 @@ function readStatus(response: ApiResponse<LLMStatus>) {
   return status;
 }
 
-export async function getLLMStatus() {
-  return readStatus((await apiClient.get<ApiResponse<LLMStatus>>("/llm/config")).data);
+export async function getLLMStatus(signal?: AbortSignal) {
+  return readStatus((await apiClient.get<ApiResponse<LLMStatus>>("/llm/config", {
+    signal, timeout: LLM_READ_TIMEOUT_MS,
+  })).data);
 }
 
-export async function getLLMProviders() {
-  const { data: response } = await apiClient.get<ApiResponse<ProviderCatalog>>("/llm/providers");
+export async function getLLMProviders(signal?: AbortSignal) {
+  const { data: response } = await apiClient.get<ApiResponse<ProviderCatalog>>("/llm/providers", {
+    signal, timeout: LLM_READ_TIMEOUT_MS,
+  });
   const catalog = response?.data;
   if (response?.success !== true || !catalog || ![catalog.openai, catalog.gemini].every(
     (models) => Array.isArray(models) && models.every((model) => typeof model === "string" && model.length > 0),

@@ -27,19 +27,19 @@ export function LLMSettingsPage() {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    let active = true;
-    getLLMProviders().then((options) => {
-      if (active) setProviders(options);
+    const request = new AbortController();
+    getLLMProviders(request.signal).then((options) => {
+      if (!request.signal.aborted) setProviders(options);
     }).catch((failure: unknown) => {
-      if (active) setCatalogError(getApiErrorMessage(failure));
+      if (!request.signal.aborted) setCatalogError(getApiErrorMessage(failure));
     });
-    return () => { active = false; };
+    return () => request.abort();
   }, [catalogAttempt]);
 
   useEffect(() => {
-    let active = true;
-    getLLMStatus().then((saved) => {
-      if (!active) return;
+    const request = new AbortController();
+    getLLMStatus(request.signal).then((saved) => {
+      if (request.signal.aborted) return;
       setConfig(saved);
       if (!draftEdited.current) {
         setProvider(saved.provider ?? "openai");
@@ -48,9 +48,9 @@ export function LLMSettingsPage() {
       }
       setWorkspaceReady(true);
     }).catch((failure: unknown) => {
-      if (active) setWorkspaceError(getApiErrorMessage(failure));
+      if (!request.signal.aborted) setWorkspaceError(getApiErrorMessage(failure));
     });
-    return () => { active = false; };
+    return () => request.abort();
   }, [workspaceAttempt]);
 
   const models = providers?.[provider] ?? [];

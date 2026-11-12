@@ -12,7 +12,10 @@ from urllib.parse import urlsplit
 
 from cryptography.fernet import Fernet
 from pydantic import AliasChoices, Field, ValidationInfo, field_validator, model_validator
+from pydantic import ValidationError as SettingsValidationError
+from pydantic_core import PydanticCustomError
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+from pydantic_settings.exceptions import SettingsError
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import ArgumentError
 
@@ -174,7 +177,7 @@ class Settings(BaseSettings):
             return None if info.field_name == "direct_database_url" else _default_database_url()
         try:
             url = make_url(normalized)
-        except ArgumentError:
+        except (ArgumentError, ValueError):
             raise ValueError("Invalid database URL.") from None
         if url.get_backend_name() == "sqlite":
             if info.field_name == "direct_database_url":
@@ -195,53 +198,58 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_deployment(self) -> Settings:
-        if os.environ.get("VERCEL") == "1" and not self.is_production:
-            raise ValueError("Set ENVIRONMENT=production on the Vercel backend.")
+        issues = []
+        hosted = os.environ.get("VERCEL") == "1"
+        if hosted and not self.is_production:
+            issues.append("Set ENVIRONMENT=production on the Vercel backend.")
         if self.storage_provider == "s3":
             required = ("storage_bucket", "storage_region", "storage_access_key_id", "storage_secret_access_key")
             missing = [field.upper() for field in required if not (getattr(self, field) or "").strip()]
             if missing:
-                raise ValueError(f"S3 storage requires {', '.join(missing)}.")
+                issues.append(f"S3 storage requires {', '.join(missing)}.")
         if self.llm_encryption_key:
             try:
                 Fernet(self.llm_encryption_key.encode())
             except (ValueError, TypeError):
-                raise ValueError("LLM_ENCRYPTION_KEY must be a generated Fernet key.") from None
-        if not self.is_production:
-            return self
+                issues.append("LLM_ENCRYPTION_KEY must be a generated Fernet key.")
+        if self.is_production:
+            issues.extend(self._production_issues())
+        if issues:
+            raise PydanticCustomError("deployment_settings", "{issues}", {"issues": " ".join(issues)})
+        return self
+
+    def _production_issues(self) -> list[str]:
+        issues = []
         if self.debug:
-            raise ValueError("Production requires DEBUG=false.")
+            issues.append("Production requires DEBUG=false.")
         secret = self.workspace_signing_secret
         if len(secret.strip().encode()) < 32 or secret == DEV_SECRET:
-            raise ValueError("WORKSPACE_SIGNING_SECRET requires a generated secret of at least 32 bytes.")
+            issues.append("WORKSPACE_SIGNING_SECRET requires a generated secret of at least 32 bytes.")
         if not self.llm_encryption_key:
-            raise ValueError("Production requires LLM_ENCRYPTION_KEY.")
+            issues.append("Production requires LLM_ENCRYPTION_KEY.")
         for name, value in (("DATABASE_URL", self.database_url), ("DIRECT_DATABASE_URL", self.direct_database_url)):
-            if value is None:
-                continue
-            url = make_url(value)
-            if url.drivername != "postgresql+psycopg" or url.query.get("sslmode") not in {
-                "require", "verify-ca", "verify-full"
-            }:
-                raise ValueError(f"{name} must be a TLS-enabled PostgreSQL URL in production.")
+            if value is not None:
+                url = make_url(value)
+                if url.drivername != "postgresql+psycopg" or url.query.get("sslmode") not in {
+                    "require", "verify-ca", "verify-full"
+                }:
+                    issues.append(f"{name} must be a TLS-enabled PostgreSQL URL in production.")
         if self.storage_provider != "s3":
-            raise ValueError("Production requires STORAGE_PROVIDER=s3.")
+            issues.append("Production requires STORAGE_PROVIDER=s3.")
         if self.storage_endpoint:
-            endpoint = urlsplit(self.storage_endpoint)
-            if endpoint.scheme != "https" or not endpoint.hostname:
-                raise ValueError("STORAGE_ENDPOINT must use HTTPS in production.")
+            try:
+                endpoint = urlsplit(self.storage_endpoint)
+                valid_endpoint = endpoint.scheme == "https" and bool(endpoint.hostname)
+            except ValueError:
+                valid_endpoint = False
+            if not valid_endpoint:
+                issues.append("STORAGE_ENDPOINT must be an HTTPS URL with a valid hostname.")
         origins = self.effective_allowed_cors_origins
         if not origins:
-            raise ValueError("Configure FRONTEND_URL or ALLOWED_CORS_ORIGINS in production.")
-        for origin in origins:
-            parsed = urlsplit(origin)
-            if (
-                parsed.scheme != "https" or not parsed.hostname or "*" in origin
-                or parsed.username is not None or parsed.password is not None
-                or origin != f"https://{parsed.netloc}" or parsed.port == 0
-            ):
-                raise ValueError("CORS origins must be exact HTTPS origins without a path or wildcard.")
-        return self
+            issues.append("Configure FRONTEND_URL or ALLOWED_CORS_ORIGINS in production.")
+        elif not all(is_https_origin(origin) for origin in origins):
+            issues.append("FRONTEND_URL and ALLOWED_CORS_ORIGINS must contain exact HTTPS origins.")
+        return issues
 
     @property
     def backend_cors_origins(self) -> list[str]:
@@ -288,8 +296,35 @@ class Settings(BaseSettings):
         return path.resolve()
 
 
+def is_https_origin(origin: str) -> bool:
+    try:
+        parsed = urlsplit(origin)
+        return bool(
+            parsed.scheme == "https" and parsed.hostname and "*" not in origin
+            and parsed.username is None and parsed.password is None
+            and origin == f"https://{parsed.netloc}" and parsed.port != 0
+        )
+    except ValueError:
+        return False
+
+
 @lru_cache
 def get_settings() -> Settings:
     """Return cached settings so dependencies share one configuration object."""
-    return Settings()
+    try:
+        return Settings()
+    except SettingsValidationError as exc:
+        if os.environ.get("VERCEL") != "1":
+            raise
+        issues = []
+        for error in exc.errors(include_url=False, include_context=False, include_input=False):
+            if error["type"] == "deployment_settings":
+                issues.append(error["msg"])
+            elif error["loc"]:
+                issues.append(f"Invalid setting: {str(error['loc'][0]).upper()}.")
+        raise RuntimeError("ClinicalAI startup configuration failed. " + " ".join(issues)) from None
+    except SettingsError:
+        if os.environ.get("VERCEL") != "1":
+            raise
+        raise RuntimeError("ClinicalAI could not parse its startup environment. Check deployment variable formats.") from None
 

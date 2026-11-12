@@ -217,6 +217,54 @@ test("a failed catalog can be retried independently of the saved configuration",
   await expect(page.getByRole("alert")).toHaveCount(0);
 });
 
+test("workspace setup times out while another tab holds its lock and can be retried", async ({ page }) => {
+  const requests = await api(page, false);
+  await page.clock.install();
+  await page.addInitScript(() => {
+    void navigator.locks.request("clinicalai-workspace", () => new Promise<void>((release) => {
+      window.addEventListener("release-test-workspace-lock", () => release(), { once: true });
+    }));
+  });
+  await page.goto("/settings/llm");
+  await expect(page.getByText("Loading workspace")).toBeVisible();
+  await expect(page.getByLabel(/^Model/)).toBeEnabled();
+  await page.clock.runFor(12_100);
+  await expect(page.getByRole("alert")).toContainText("Workspace setup timed out");
+  expect(requests.filter((r) => r.path === "/workspace")).toHaveLength(0);
+  await page.evaluate(() => window.dispatchEvent(new Event("release-test-workspace-lock")));
+  await page.getByRole("button", { name: "Retry workspace" }).click();
+  await expect(page.getByText("LLM Not Configured")).toBeVisible();
+  expect(requests.filter((r) => r.path === "/workspace")).toHaveLength(1);
+});
+
+test("a deployed API crash ends both initialization states and explains the failure", async ({ page }) => {
+  await page.route(/\/api\/v1\/(workspace|llm\/providers)$/, (route) => route.fulfill({
+    status: 500, contentType: "text/plain", body: "A server error has occurred\nFUNCTION_INVOCATION_FAILED",
+  }));
+  await page.goto("/settings/llm");
+  await expect(page.getByRole("alert").filter({ hasText: "Unable to load available models" }))
+    .toContainText("The deployed ClinicalAI API failed to start or respond.");
+  await expect(page.getByRole("alert").filter({ hasText: "Unable to open your guest workspace" }))
+    .toContainText("The deployed ClinicalAI API failed to start or respond.");
+  await expect(page.getByRole("button", { name: "Retry models" })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Retry workspace" })).toBeEnabled();
+});
+
+test("an unanswered catalog reaches a retry state while workspace loading completes", async ({ page }) => {
+  await api(page, false);
+  let answerCatalog = false;
+  await page.route("**/api/v1/llm/providers", async (route) => {
+    if (answerCatalog) await route.fallback();
+  });
+  await page.goto("/settings/llm");
+  await expect(page.getByText("LLM Not Configured")).toBeVisible();
+  await expect(page.getByText("Loading models…", { exact: true })).toBeAttached();
+  await expect(page.getByRole("alert")).toContainText("The request timed out", { timeout: 15_000 });
+  answerCatalog = true;
+  await page.getByRole("button", { name: "Retry models" }).click();
+  await expect(page.getByLabel(/^Model/)).toBeEnabled();
+});
+
 test("patient validation, every clinical form, profile editing, analysis objects and reset", async ({
   page,
 }) => {

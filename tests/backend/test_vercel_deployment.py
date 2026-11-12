@@ -26,7 +26,7 @@ from app.services.exceptions import StorageUnavailableError, ValidationError
 from app.services.report_storage import S3ReportStorage
 
 
-from tests.backend.workspace_helpers import seed_workspace, start_workspace
+from tests.backend.workspace_helpers import WORKSPACE_HEADERS, seed_workspace, start_workspace
 
 ROOT = Path(__file__).resolve().parents[2]
 PRODUCTION = {
@@ -84,6 +84,10 @@ assert engine.url.query['sslmode'] == 'require'
 assert get_settings().resolve_database_path() is None
 with TestClient(app) as client:
     assert client.get('/api/v1/health').json()['data']['status'] == 'ok'
+    catalog = client.get('/api/v1/llm/providers')
+    assert catalog.status_code == 200
+    assert set(catalog.json()['data']) == {'openai', 'gemini'}
+    assert all(catalog.json()['data'].values())
     for path in ('/docs', '/redoc', '/openapi.json'):
         assert client.get(path).status_code == 200
     for path in ('/patients', '/patients/1/reports', '/patients/1/symptoms', '/patients/1/analysis'):
@@ -99,6 +103,23 @@ with TestClient(app) as client:
     result = subprocess.run([sys.executable, "-c", code], cwd=ROOT / "backend", env=env, capture_output=True, text=True)
     assert result.returncode == 0, result.stdout + result.stderr
     assert not (tmp_path / "no-uploads").exists()
+
+
+def test_hosted_startup_reports_missing_settings_without_values():
+    synthetic_bad_value = "synthetic-private-value"
+    env = os.environ | PRODUCTION | {
+        "VERCEL": "1", "DEBUG": "true", "LLM_ENCRYPTION_KEY": "",
+        "WORKSPACE_SIGNING_SECRET": synthetic_bad_value,
+        "STORAGE_PROVIDER": "s3", "STORAGE_BUCKET": "", "STORAGE_SECRET_ACCESS_KEY": "",
+    }
+    result = subprocess.run(
+        [sys.executable, "-c", "from app.main import app"],
+        cwd=ROOT / "backend", env=env, capture_output=True, text=True,
+    )
+    assert result.returncode != 0
+    for name in ("DEBUG", "WORKSPACE_SIGNING_SECRET", "LLM_ENCRYPTION_KEY", "STORAGE_BUCKET", "STORAGE_SECRET_ACCESS_KEY"):
+        assert name in result.stderr
+    assert synthetic_bad_value not in result.stderr
 
 
 class FakeReportStorage:
@@ -222,6 +243,21 @@ def test_postgresql_migrations_workspaces_and_report_lifecycle(tmp_path, monkeyp
     url = os.environ["TEST_POSTGRES_URL"]
     engine = create_engine(Settings(DATABASE_URL=url, _env_file=None).database_url)
     assert not inspect(engine).get_table_names(), "TEST_POSTGRES_URL must reference an empty disposable database"
+
+    def postgres_session():
+        with Session(engine) as db:
+            yield db
+
+    monkeypatch.setitem(app.dependency_overrides, get_db, postgres_session)
+    client = TestClient(app)
+    catalog = client.get("/api/v1/llm/providers")
+    assert catalog.status_code == 200
+    assert catalog.json()["data"]["openai"] and catalog.json()["data"]["gemini"]
+    before_migration = client.post("/api/v1/workspace", headers=WORKSPACE_HEADERS)
+    assert before_migration.status_code == 503
+    assert before_migration.json()["error"] == "database_schema_incomplete"
+    assert "set-cookie" not in before_migration.headers
+
     result = subprocess.run(
         [sys.executable, "-m", "alembic", "-c", "alembic.ini", "upgrade", "head"],
         cwd=ROOT / "backend",
@@ -231,12 +267,6 @@ def test_postgresql_migrations_workspaces_and_report_lifecycle(tmp_path, monkeyp
     assert result.returncode == 0, result.stdout + result.stderr
     monkeypatch.setattr(medical_report, "REPORTS_STORAGE_DIR", tmp_path)
 
-    def postgres_session():
-        with Session(engine) as db:
-            yield db
-
-    monkeypatch.setitem(app.dependency_overrides, get_db, postgres_session)
-    client = TestClient(app)
     assert client.get("/api/v1/patients").status_code == 401
     headers = start_workspace(client)
     other_visitor = TestClient(app)
