@@ -156,30 +156,6 @@ textarea:focus-visible {
   min-width: 0;
   animation: brand-in 450ms 320ms var(--ease) both;
 }
-.avatar {
-  width: 37px;
-  height: 37px;
-  border-radius: 50%;
-  background: #eaf3f4;
-  display: grid;
-  place-items: center;
-  color: var(--teal);
-  font-weight: 650;
-  font-size: 13px;
-}
-.account-name {
-  font-size: 12px;
-  font-weight: 650;
-  max-width: 180px;
-  overflow-wrap: anywhere;
-}
-.account-name small {
-  display: block;
-  font-size: 10px;
-  font-weight: 450;
-  margin-top: 4px;
-  color: var(--muted);
-}
 .icon-button {
   min-width: 40px;
   min-height: 40px;
@@ -198,13 +174,6 @@ textarea:focus-visible {
 .icon-button:hover {
   background: #e9f0f3;
   color: var(--navy);
-}
-.logout-button {
-  margin-left: 13px;
-  padding: 0 10px;
-  font-size: 11px;
-  border-left: 1px solid var(--border);
-  border-radius: 0 8px 8px 0;
 }
 .header-tag {
   display: flex;
@@ -1683,125 +1652,6 @@ progress::-moz-progress-bar {
 .status-explanation p {
   margin-top: 4px;
 }
-.auth-page {
-  display: grid;
-  grid-template-columns: 1.05fr 1fr;
-  min-height: 700px;
-  border: 1px solid var(--border);
-  border-radius: 18px;
-  overflow: clip;
-  box-shadow: var(--shadow-panel);
-  background: white;
-  margin-top: 12px;
-}
-.auth-story {
-  position: relative;
-  padding: 45px 40px 30px;
-  background: linear-gradient(150deg, #edf7f7, #e7f2f3 60%, #f2f8fa);
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-}
-.auth-story h1 {
-  margin-top: 28px;
-  font-size: clamp(27px, 2.4vw, 39px);
-}
-.auth-story h1 span {
-  color: var(--teal);
-}
-.auth-story > p {
-  font-size: 12px;
-  color: #567484;
-  line-height: 1.9;
-  margin-top: 17px;
-  max-width: 330px;
-}
-.auth-story .intelligence-art {
-  width: 85%;
-  margin: -5px 0 -3px 4%;
-  opacity: 0.95;
-}
-.auth-benefits {
-  display: flex;
-  flex-direction: column;
-  gap: 23px;
-  margin-top: auto;
-}
-.auth-benefits > div {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-.auth-benefit-icon {
-  width: 38px;
-  height: 38px;
-  border: 1px solid #c8e2e4;
-  border-radius: 10px;
-  color: var(--teal);
-  display: grid;
-  place-items: center;
-}
-.auth-benefits strong {
-  font-size: 11px;
-  font-weight: 600;
-}
-.auth-benefits small {
-  display: block;
-  margin-top: 5px;
-  font-size: 10px;
-  line-height: 1.7;
-  color: #567484;
-}
-.auth-story p.auth-story-footer {
-  margin-top: 30px;
-  padding-top: 20px;
-  border-top: 1px solid #d7e7e9;
-  font-size: 9px;
-  max-width: none;
-}
-.auth-form-panel {
-  padding: 40px 35px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.auth-form-inner {
-  width: 100%;
-  max-width: 340px;
-}
-.auth-form-icon {
-  width: 45px;
-  height: 45px;
-  border-radius: 12px;
-  display: grid;
-  place-items: center;
-  background: #eef7f7;
-  color: var(--teal);
-  margin-bottom: 24px;
-}
-.auth-form-panel .eyebrow {
-  font-size: 8px;
-}
-.auth-form-panel h2 {
-  font-size: 28px;
-  letter-spacing: -0.9px;
-  font-weight: 600;
-  margin-top: 10px;
-}
-.auth-form-inner > p {
-  font-size: 11px;
-  line-height: 1.8;
-  color: var(--muted);
-  margin-top: 10px;
-}
-.auth-form-panel form {
-  margin-top: 29px;
-}
-.auth-form-panel fieldset {
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-}
 .password-input {
   position: relative;
   display: block;
@@ -1815,47 +1665,12 @@ progress::-moz-progress-bar {
   top: 2px;
   min-height: 39px;
 }
-.auth-submit {
-  width: 100%;
-  margin-top: 4px;
-  justify-content: space-between;
-}
-.auth-form-inner p.auth-switch {
-  font-size: 11px;
-  text-align: center;
-  margin-top: 25px;
-}
-.auth-switch a {
-  font-weight: 600;
-  color: var(--teal-dark);
-  text-decoration: underline;
-  text-underline-offset: 3px;
-}
-.auth-form-note {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  gap: 6px;
-  font-size: 8px;
-  line-height: 1.8;
-  color: var(--muted);
-  border-top: 1px solid var(--border);
-  padding-top: 23px;
-  margin-top: 28px;
-}
 .reveal-enter {
   animation: card-in var(--motion-duration) var(--reveal-delay, 0ms) var(--ease)
     backwards;
 }
 .spin {
   animation: spin 1s linear infinite;
-}
-.session-loading {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  color: var(--muted);
-  font-size: 14px;
 }
 .nav-scrim {
   display: none;
@@ -2011,15 +1826,6 @@ progress::-moz-progress-bar {
   .health-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-  .auth-page {
-    grid-template-columns: 1fr 1fr;
-  }
-  .auth-story {
-    padding: 35px 25px 25px;
-  }
-  .auth-form-panel {
-    padding: 35px 25px;
-  }
 }
 @media (max-width: 1023px) {
   .sidebar {
@@ -2066,27 +1872,8 @@ progress::-moz-progress-bar {
   .workspace-hero {
     min-height: 200px;
   }
-  .auth-page {
-    min-height: 640px;
-  }
-  .auth-story {
-    padding: 29px 21px;
-  }
-  .auth-story h1 {
-    font-size: 28px;
-  }
-  .auth-benefits small {
-    font-size: 9px;
-  }
   .header-account {
     gap: 8px;
-  }
-  .account-name {
-    max-width: 115px;
-    font-size: 11px;
-  }
-  .logout-button {
-    margin-left: 2px;
   }
   .workspace-label > span,
   .workspace-label > svg {
@@ -2120,21 +1907,6 @@ progress::-moz-progress-bar {
   .header-divider,
   .workspace-label,
   .header-tag {
-    display: none;
-  }
-  .account-name {
-    display: none;
-  }
-  .avatar {
-    width: 32px;
-    height: 32px;
-  }
-  .logout-button {
-    min-width: 34px;
-    border: 0;
-    padding: 0;
-  }
-  .logout-button > span {
     display: none;
   }
   .menu-toggle {
@@ -2286,52 +2058,6 @@ progress::-moz-progress-bar {
   }
   .page-footer {
     font-size: 9px;
-  }
-  .auth-page {
-    grid-template-columns: 1fr;
-    margin-top: 0;
-  }
-  .auth-story {
-    padding: 29px;
-    min-height: 235px;
-  }
-  .auth-story .intelligence-art {
-    position: absolute;
-    right: -50px;
-    top: 5px;
-    width: 270px;
-    opacity: 0.3;
-    pointer-events: none;
-  }
-  .auth-story h1 {
-    font-size: 31px;
-    position: relative;
-    margin-top: 22px;
-  }
-  .auth-story > p {
-    position: relative;
-    max-width: 300px;
-    font-size: 11px;
-  }
-  .auth-benefits,
-  .auth-story .auth-story-footer {
-    display: none;
-  }
-  .auth-form-panel {
-    padding: 30px;
-  }
-  .auth-form-inner {
-    max-width: 440px;
-  }
-  .auth-form-icon {
-    display: none;
-  }
-  .auth-form-note {
-    font-size: 10px;
-  }
-  .auth-form-inner > p,
-  .auth-form-inner p.auth-switch {
-    font-size: 12px;
   }
   .password-input .icon-button {
     min-height: 40px;
@@ -2524,9 +2250,6 @@ progress::-moz-progress-bar {
     font-size: 6px;
     letter-spacing: 1.4px;
   }
-  .avatar {
-    display: none;
-  }
   .workspace-hero h1 {
     font-size: 30px;
   }
@@ -2573,16 +2296,6 @@ progress::-moz-progress-bar {
   .context-card .form-grid {
     grid-template-columns: minmax(0, 1fr);
   }
-  .auth-form-panel,
-  .auth-story {
-    padding: 25px 20px;
-  }
-  .auth-story h1 {
-    font-size: 28px;
-  }
-  .auth-form-panel h2 {
-    font-size: 25px;
-  }
 }
 @media (prefers-reduced-motion: reduce) {
   *,
@@ -2617,4 +2330,34 @@ progress::-moz-progress-bar {
   .panel {
     box-shadow: none;
   }
+}
+.llm-settings {
+  max-width: 48rem;
+  margin: 2rem auto;
+}
+
+.llm-settings form, .llm-home-status {
+  display: grid;
+  gap: 1rem;
+}
+
+.llm-home-status {
+  justify-items: start;
+  gap: .6rem;
+}
+
+.llm-key-row, .llm-actions, .llm-remember, .saved-patients {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .75rem;
+}
+
+.llm-key-row .field, .saved-patients .field {
+  flex: 1 1 15rem;
+  min-width: 0;
+}
+
+.saved-patients {
+  margin-bottom: 1rem;
 }

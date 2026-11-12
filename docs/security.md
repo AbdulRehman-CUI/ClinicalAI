@@ -1,5 +1,7 @@
 # Phase 8 – Authentication & Security
 
+> Historical design for the retired account and role system. See the [guest workspace and BYOK guide](GUEST_WORKSPACES.md) for current access controls.
+
 ## Objective
 
 Introduce authentication and authorization without changing the existing application architecture.

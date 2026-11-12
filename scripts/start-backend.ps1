@@ -10,7 +10,7 @@ $configurationJson = & $python (Join-Path $PSScriptRoot 'check_environment.py') 
 if ($LASTEXITCODE -ne 0) { throw 'Backend preflight failed. Correct the configuration or run scripts\setup.ps1 -RecreateVenv.' }
 $configuration = $configurationJson | ConvertFrom-Json
 if (-not $configuration.ai_configured) {
-    Write-Warning "$($configuration.ai_provider) credentials are not configured. Authentication and patient records work; AI analysis requires the selected provider's API key in .env."
+    Write-Warning "Set LLM_ENCRYPTION_KEY in .env to enable encrypted visitor LLM configuration."
 }
 $backendPath = Join-Path $projectRoot 'backend'
 $uvicornArgs = @('-m', 'uvicorn', 'app.main:app', '--app-dir', $backendPath, '--host', $configuration.host, '--port', [string]$configuration.port)

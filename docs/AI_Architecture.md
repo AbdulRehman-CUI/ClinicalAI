@@ -1,4 +1,6 @@
 # ClinicalAI
+
+> This document records an earlier project phase. For current workspace credentials and deployment settings, see the [guest workspace guide](GUEST_WORKSPACES.md) and [Vercel deployment guide](VERCEL_DEPLOYMENT.md).
 ## Phase 4 – AI Architecture
 
 ---

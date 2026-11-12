@@ -2,16 +2,17 @@ from __future__ import annotations
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.db import session as db_session_module
 from app.db.base import Base
-from app.db.models import AIAnalysis
+from app.db.models import GuestWorkspace
 from app.main import app
 from app.repositories.patient import PatientRepository
 from app.repositories.symptom import SymptomRepository
+from tests.backend.workspace_helpers import start_workspace
 
 
 @pytest.fixture()
@@ -36,7 +37,7 @@ def db_session() -> Session:
 
 
 @pytest.fixture()
-def client(db_session: Session) -> TestClient:
+def client(db_session: Session, monkeypatch) -> TestClient:
     def override_get_db() -> Session:
         db = db_session_module.SessionLocal()
         try:
@@ -45,15 +46,18 @@ def client(db_session: Session) -> TestClient:
             db.close()
 
     app.dependency_overrides[db_session_module.get_db] = override_get_db
+    monkeypatch.setattr("app.services.analysis.configured_provider", lambda db: object())
 
     with TestClient(app) as test_client:
+        start_workspace(test_client)
         yield test_client
 
     app.dependency_overrides.clear()
 
 
 @pytest.fixture()
-def populated_patient(db_session: Session) -> int:
+def populated_patient(db_session: Session, client: TestClient) -> int:
+    db_session.info["workspace_id"] = db_session.scalar(select(GuestWorkspace.id))
     patient = PatientRepository(db_session).create(
         {
             "first_name": "Dana",

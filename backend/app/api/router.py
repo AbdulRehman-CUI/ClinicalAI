@@ -1,17 +1,14 @@
 """Top-level API router for versioned REST endpoints."""
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
-from app.api.routes import ai_analysis, allergies, auth, health, medical_history, medical_reports, medications, patients, symptoms
+from app.api.routes import ai_analysis, allergies, health, llm, medical_history, medical_reports, medications, patients, symptoms
+from app.api.workspace import get_workspace, router as workspace_router
 
 api_router = APIRouter()
 api_router.include_router(health.router, tags=["health"])
-api_router.include_router(auth.router)
-api_router.include_router(patients.router)
-api_router.include_router(medical_history.router)
-api_router.include_router(medications.router)
-api_router.include_router(allergies.router)
-api_router.include_router(symptoms.router)
-api_router.include_router(medical_reports.router)
-api_router.include_router(ai_analysis.router)
+api_router.include_router(workspace_router)
+api_router.include_router(llm.router)
+for clinical_router in (patients, medical_history, medications, allergies, symptoms, medical_reports, ai_analysis):
+    api_router.include_router(clinical_router.router, dependencies=[Depends(get_workspace)])
 

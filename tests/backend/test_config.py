@@ -16,12 +16,12 @@ def test_settings_exposes_core_runtime_options() -> None:
     assert settings.debug is True
     assert settings.log_level == "INFO"
     assert settings.log_format
-    assert settings.secret_key
+    assert settings.workspace_signing_secret
     assert settings.allowed_cors_origins
     assert settings.upload_directory
     assert settings.max_upload_size_mb > 0
     assert settings.allowed_file_extensions
-    assert settings.ai_provider
+    assert settings.openai_models and settings.gemini_models
     assert settings.ocr_provider
     assert settings.storage_provider
     assert settings.default_page_size > 0

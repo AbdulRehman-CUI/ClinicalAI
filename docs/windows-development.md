@@ -106,7 +106,7 @@ Open `http://127.0.0.1:5173`; backend API documentation is at `http://127.0.0.1:
 
 Restart Vite after changing port settings. Backend host and port can also be overridden by process environment variables. Relative SQLite and upload paths resolve against the checkout rather than the terminal's working directory. An intentionally absolute data path remains absolute after a move; review those settings yourself before changing them.
 
-Provider API keys are required only for AI analysis. Login and patient entry do not require them. Invalid configuration is reported by `scripts/check_environment.py` using field names without printing secret values.
+Generate a Fernet key and set `LLM_ENCRYPTION_KEY` in `.env` to enable BYOK. Visitors supply their own provider keys through LLM settings. The preflight reports invalid configuration fields without printing secret values.
 
 ## Verification
 
@@ -127,11 +127,4 @@ npx.cmd playwright install chromium
 npm.cmd test
 ```
 
-Backend tests use isolated fixtures and migration tests use temporary databases. Browser tests intercept synthetic API records. They do not call a live AI provider. See [authentication investigation](authentication-fix.md) for the independently fixed profile response error and existing-account verification:
-
-```powershell
-# With the real backend running, from the checkout root:
-.\.venv\Scripts\python.exe scripts\verify_auth.py
-```
-
-The helper prompts for the password without displaying it. The previous authentication HTTP 500 was caused by missing profile timestamps, independently of the relocated virtual environment. Preserve that fix when changing setup files; do not reset the users database.
+Backend tests use isolated databases and mock the provider APIs. Browser tests cover account-free navigation, report uploads, and workspace LLM settings. See the [guest workspace guide](GUEST_WORKSPACES.md) for configuring encryption and browser continuity.

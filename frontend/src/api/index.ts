@@ -1,3 +1,4 @@
+import axios from "axios";
 import { apiClient } from "./client";
 import type {
   AIAnalysisRead,
@@ -162,22 +163,51 @@ export async function uploadReport(
   file: File,
   onProgress?: (percent: number) => void,
 ) {
+  const path = `/patients/${patientId}/reports`;
+  const onUploadProgress = ({ loaded, total }: { loaded: number; total?: number }) => {
+    if (total) onProgress?.(Math.round((loaded * 100) / total));
+  };
+  if (import.meta.env.VITE_DIRECT_REPORT_UPLOADS === "true") {
+    const intent = await apiClient.post<ApiResponse<{
+      token: string;
+      url: string;
+      fields: Record<string, string>;
+    }>>(`${path}/upload-intent`, { filename: file.name, size: file.size });
+    const upload = intent.data.data;
+    if (!upload) throw new Error("ClinicalAI did not authorize the report upload.");
+
+    const formData = new FormData();
+    for (const [name, value] of Object.entries(upload.fields)) {
+      formData.append(name, value);
+    }
+    formData.append("file", file);
+    try {
+      // Use a separate client so the ClinicalAI bearer token stays on the backend origin.
+      await axios.post(upload.url, formData, {
+        timeout: 600_000,
+        onUploadProgress,
+        withCredentials: false,
+      });
+    } catch {
+      throw new Error("The report could not be transferred to storage. Please try again.");
+    }
+    const response = await apiClient.post<ApiResponse<MedicalReportRead>>(
+      `${path}/complete`, { token: upload.token }, { timeout: 310_000 },
+    );
+    return response.data;
+  }
+
   const formData = new FormData();
   formData.append("file", file);
 
   const response = await apiClient.post<ApiResponse<MedicalReportRead>>(
-    `/patients/${patientId}/reports`,
+    path,
     formData,
     {
       headers: {
         "Content-Type": "multipart/form-data",
       },
-      onUploadProgress: (progressEvent) => {
-        if (progressEvent.total) {
-          const percent = Math.round((progressEvent.loaded * 100) / progressEvent.total);
-          onProgress?.(percent);
-        }
-      },
+      onUploadProgress,
     },
   );
   return response.data;
@@ -192,12 +222,16 @@ export async function listReports(patientId: number, page = 1, pageSize = 20) {
 }
 
 export async function getReport(reportId: number) {
-  const response = await apiClient.get<ApiResponse<MedicalReportRead>>(`/reports/${reportId}`);
+  const response = await apiClient.get<ApiResponse<MedicalReportRead>>(`/patients/reports/${reportId}`);
   return response.data;
 }
 
+export function reportDownloadUrl(reportId: number) {
+  return `${apiClient.defaults.baseURL?.replace(/\/$/, "")}/patients/reports/${reportId}/download`;
+}
+
 export async function deleteReport(reportId: number) {
-  await apiClient.delete(`/reports/${reportId}`);
+  await apiClient.delete(`/patients/reports/${reportId}`);
 }
 
 export async function createAnalysis(patientId: number, reportId?: number | null) {
@@ -212,7 +246,9 @@ export async function createAnalysis(patientId: number, reportId?: number | null
 }
 
 export async function analyzePatient(patientId: number) {
-  const response = await apiClient.post<ApiResponse<AnalysisResult>>(`/patients/${patientId}/analyze`);
+  const response = await apiClient.post<ApiResponse<AnalysisResult>>(
+    `/patients/${patientId}/analyze`, undefined, { timeout: 310_000 },
+  );
   return response.data;
 }
 
@@ -225,6 +261,6 @@ export async function listAnalyses(patientId: number, page = 1, pageSize = 20) {
 }
 
 export async function getAnalysis(analysisId: number) {
-  const response = await apiClient.get<ApiResponse<AIAnalysisRead>>(`/analysis/${analysisId}`);
+  const response = await apiClient.get<ApiResponse<AIAnalysisRead>>(`/patients/analysis/${analysisId}`);
   return response.data;
 }

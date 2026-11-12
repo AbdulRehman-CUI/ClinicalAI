@@ -1,0 +1,6 @@
+.env
+.env.*
+data/
+backend/data/
+.venv.backup*/
+*.log

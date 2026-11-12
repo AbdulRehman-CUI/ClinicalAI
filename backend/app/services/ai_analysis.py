@@ -15,6 +15,7 @@ from app.repositories.medical_report import MedicalReportRepository
 from app.schemas.ai_analysis import AIAnalysisCreate, AIAnalysisRead
 from app.schemas.common import PaginationMeta
 from app.services.exceptions import ResourceNotFoundError, ValidationError
+from app.services.llm import require_configuration
 
 
 class AIAnalysisService:
@@ -37,6 +38,7 @@ class AIAnalysisService:
             self._ensure_report_exists(report_id)
             if self._report_belongs_to_patient(report_id, patient_id) is False:
                 raise ValidationError("The provided report does not belong to the patient.")
+        require_configuration(self.analysis_repository.db)
 
         data = {
             "patient_id": patient_id,
@@ -62,10 +64,9 @@ class AIAnalysisService:
         """Return paginated analysis records for one patient."""
         self._ensure_patient_exists(patient_id)
         offset = (page - 1) * page_size
-        total_items = self.analysis_repository.count()
-        instances: Sequence = self.analysis_repository.list(offset=offset, limit=page_size)
-        items = [AIAnalysisRead.model_validate(instance) for instance in instances if instance.patient_id == patient_id]
-        total_items = len(items)
+        total_items = self.analysis_repository.count(patient_id=patient_id)
+        instances: Sequence = self.analysis_repository.list(offset=offset, limit=page_size, patient_id=patient_id)
+        items = [AIAnalysisRead.model_validate(instance) for instance in instances]
         total_pages = math.ceil(total_items / page_size) if total_items else 1
         pagination = PaginationMeta(
             page=page,

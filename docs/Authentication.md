@@ -1,5 +1,7 @@
 # Authentication Design
 
+> Historical design for the retired account and role system. See the [guest workspace and BYOK guide](GUEST_WORKSPACES.md) for current access controls.
+
 ## Objective
 
 Secure ClinicalAI using JWT authentication and role-based authorization while keeping the architecture modular and configuration-driven.

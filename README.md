@@ -1,6 +1,6 @@
 # ClinicalAI
 
-A React/TypeScript clinical workspace with a FastAPI backend, SQLite persistence, JWT authentication, medical report uploads, and configurable AI decision support.
+A React and FastAPI clinical workspace with anonymous guest workspaces, private report storage, and AI decision support powered by each visitor’s OpenAI or Gemini key.
 
 ## Windows quick start
 
@@ -35,9 +35,17 @@ Read the [Windows development guide](docs/windows-development.md) for safe envir
 npm.cmd --prefix frontend run build
 ```
 
-The shared `.env` is created only if missing and remains ignored by Git. Keep `VITE_API_BASE_URL=/api/v1` to use Vite's backend proxy. AI provider keys are required for analysis, independently of authentication.
+The shared `.env` is created only if missing and remains ignored by Git. Keep `VITE_API_BASE_URL=/api/v1` to use Vite's backend proxy. To enable LLM configuration, generate a server-side key and set it as `LLM_ENCRYPTION_KEY` in `.env`.
 
-For frontend browser tests, see [frontend/README.md](frontend/README.md). For the separately fixed authentication issue and secure existing-account verification, see [docs/authentication-fix.md](docs/authentication-fix.md).
+```powershell
+.\.venv\Scripts\python.exe -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
+
+Open the dashboard and select **Configure LLM** to choose your provider and model. Patient workflows are available as soon as you open the app. Read the [guest workspace and BYOK guide](docs/GUEST_WORKSPACES.md) for browser continuity, credential handling, and retention.
+
+## Vercel
+
+Use the [Vercel deployment guide](docs/VERCEL_DEPLOYMENT.md) to configure the separate frontend and backend projects, Neon migrations, private report storage, and deployment checks.
 
 ## Docker
 

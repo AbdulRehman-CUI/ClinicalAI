@@ -19,6 +19,7 @@ from app.db.base import Base
 from app.repositories.medical_report import MedicalReportRepository
 from app.repositories.patient import PatientRepository
 from app.services.medical_report import MedicalReportService
+from tests.backend.workspace_helpers import seed_workspace
 
 
 @pytest.fixture()
@@ -37,6 +38,7 @@ def db_session() -> Session:
 
     db = TestingSessionLocal()
     try:
+        seed_workspace(db)
         yield db
     finally:
         db.close()

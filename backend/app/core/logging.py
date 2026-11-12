@@ -41,4 +41,7 @@ def configure_logging() -> None:
             },
         }
     )
+    # SDK debug output can contain request bodies, URLs and authorization headers.
+    for name in ("openai", "google.genai", "httpx", "httpcore", "boto3", "botocore", "pypdf", "sqlalchemy.engine"):
+        logging.getLogger(name).setLevel(logging.CRITICAL)
 

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import {
   AlertTriangle,
   ArrowRight,
@@ -29,7 +30,7 @@ import {
 import { AnalysisResults } from "../components/AnalysisResults";
 import toast from "react-hot-toast";
 
-import { useAuth } from "../contexts/AuthContext";
+import { getLLMStatus, providerNames, type LLMStatus } from "../api/llm";
 import {
   analyzePatient,
   createAllergy,
@@ -39,6 +40,13 @@ import {
   updatePatient,
   createSymptom,
   getApiErrorMessage,
+  listAllergies,
+  listMedicalHistory,
+  listMedications,
+  listPatients,
+  listReports,
+  listSymptoms,
+  reportDownloadUrl,
   uploadReport,
 } from "../api";
 import type {
@@ -135,7 +143,13 @@ const allowedFileTypes = ["PDF", "DOCX", "TXT", "JPG", "JPEG", "PNG"];
 const acceptedFileExtensions = ".pdf,.docx,.txt,.jpg,.jpeg,.png";
 
 export function HomePage() {
-  const { user } = useAuth();
+  const navigate = useNavigate();
+  const [llmStatus, setLLMStatus] = useState<LLMStatus | null>(null);
+  const [llmChecked, setLLMChecked] = useState(false);
+  const [savedPatients, setSavedPatients] = useState<PatientRead[]>([]);
+  const [savedPage, setSavedPage] = useState(1);
+  const [savedPages, setSavedPages] = useState(0);
+  const [openingPatient, setOpeningPatient] = useState(false);
   const [form, setForm] = useState<PatientFormState>(initialPatientForm);
   const [patient, setPatient] = useState<PatientRead | null>(null);
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
@@ -178,6 +192,7 @@ export function HomePage() {
   const canAnalyze =
     Boolean(patient) && (symptomItems.length > 0 || reportItems.length > 0);
   const busy =
+    openingPatient ||
     isCreatingPatient ||
     isCreatingHistory ||
     isCreatingAllergy ||
@@ -194,6 +209,28 @@ export function HomePage() {
   useEffect(() => {
     if (errorMessage) errorRef.current?.focus();
   }, [errorMessage]);
+  useEffect(() => {
+    let active = true;
+    getLLMStatus().then((status) => {
+      if (active) setLLMStatus(status);
+    }).catch((error: unknown) => {
+      if (active) setErrorMessage(getApiErrorMessage(error, "Unable to check the LLM configuration."));
+    }).finally(() => {
+      if (active) setLLMChecked(true);
+    });
+    return () => { active = false; };
+  }, []);
+  useEffect(() => {
+    let active = true;
+    listPatients(savedPage).then((response) => {
+      if (!active) return;
+      setSavedPatients(response.data ?? []);
+      setSavedPages(response.pagination?.total_pages ?? 0);
+    }).catch((error: unknown) => {
+      if (active) setErrorMessage(getApiErrorMessage(error, "Unable to load saved patients."));
+    });
+    return () => { active = false; };
+  }, [savedPage, patient]);
   function goToStage(next: number) {
     setStage(next);
     requestAnimationFrame(() =>
@@ -201,7 +238,46 @@ export function HomePage() {
     );
   }
 
-  const canUseAi = user?.role === "Doctor" || user?.role === "Admin";
+  const canUseAi = Boolean(llmStatus?.configured);
+
+  async function openSavedPatient(patientId: number) {
+    const selected = savedPatients.find((item) => item.id === patientId);
+    if (!selected) return;
+    setOpeningPatient(true);
+    setErrorMessage(null);
+    try {
+      const [history, allergies, medications, symptoms, reports] = await Promise.all([
+        listMedicalHistory(patientId, 1, 100), listAllergies(patientId, 1, 100),
+        listMedications(patientId, 1, 100), listSymptoms(patientId, 1, 100), listReports(patientId, 1, 100),
+      ]);
+      setPatient(selected);
+      setForm({
+        ...selected, age: String(selected.age), height_cm: String(selected.height_cm),
+        weight_kg: String(selected.weight_kg), pregnancy_status: selected.pregnancy_status ?? "Unknown",
+      });
+      setHistoryItems(history.data ?? []);
+      setAllergyItems(allergies.data ?? []);
+      setMedicationItems(medications.data ?? []);
+      setSymptomItems(symptoms.data ?? []);
+      setReportItems(reports.data ?? []);
+      setHistoryForm(initialHistoryForm);
+      setAllergyForm(initialAllergyForm);
+      setMedicationForm(initialMedicationForm);
+      setSymptomForm(initialSymptomForm);
+      setSelectedFile(null);
+      setUploadProgress(null);
+      if (fileRef.current) fileRef.current.value = "";
+      setAnalysis(null);
+      setAnalysisStale(false);
+      setEditingPatient(false);
+      setStatusMessage("Saved patient opened.");
+      goToStage(1);
+    } catch (error) {
+      setErrorMessage(getApiErrorMessage(error, "Unable to open the saved patient."));
+    } finally {
+      setOpeningPatient(false);
+    }
+  }
 
   function updatePatientField(field: keyof PatientFormState, value: string) {
     setForm((current) => ({ ...current, [field]: value }));
@@ -582,7 +658,7 @@ export function HomePage() {
 
   async function handleAnalyzePatient() {
     if (!canUseAi) {
-      setErrorMessage("AI analysis requires Doctor or Admin access.");
+      navigate("/settings/llm");
       return;
     }
     if (!patient) {
@@ -720,16 +796,32 @@ export function HomePage() {
           </p>
         </div>
         <div className="hero-caption">
-          <span className="hero-caption-mark">
-            <BrainCircuit size={21} />
-          </span>
-          <span>
-            Clinical precision.
-            <br />
-            <strong>Intelligent support.</strong>
-          </span>
+          <div className="llm-home-status">
+            <Badge tone={canUseAi ? "success" : "warning"}>
+              {canUseAi ? "LLM Configured" : llmChecked ? "LLM Not Configured" : "Checking LLM"}
+            </Badge>
+            {canUseAi && llmStatus?.provider && <small>{providerNames[llmStatus.provider]} · {llmStatus.model}</small>}
+            <Link className="button button-primary" to="/settings/llm">
+              <BrainCircuit size={17} /> {canUseAi ? "Manage LLM" : "Configure LLM"}
+            </Link>
+          </div>
         </div>
       </div>
+      {savedPatients.length > 0 && (
+        <div className="panel saved-patients">
+          <Field label="Open a saved patient" optional>
+            <select value={savedPatients.some((item) => item.id === patient?.id) ? patient?.id : ""} disabled={busy}
+              onChange={(event) => void openSavedPatient(Number(event.target.value))}>
+              <option value="">Choose a patient</option>
+              {savedPatients.map((item) => <option value={item.id} key={item.id}>{item.first_name} {item.last_name} · #{item.id}</option>)}
+            </select>
+          </Field>
+          {savedPages > 1 && <div className="llm-actions">
+            <Button type="button" variant="secondary" disabled={busy || savedPage <= 1} onClick={() => setSavedPage(savedPage - 1)}>Previous</Button>
+            <Button type="button" variant="secondary" disabled={busy || savedPage >= savedPages} onClick={() => setSavedPage(savedPage + 1)}>Next</Button>
+          </div>}
+        </div>
+      )}
       <nav className="workflow-stepper" aria-label="Clinical workflow stages">
         {stages.map(({ title, detail, icon: Icon, complete }, index) => (
           <button
@@ -1561,7 +1653,9 @@ export function HomePage() {
                               ).toLocaleString()}
                             </small>
                           </div>
-                          <Badge tone="success">Uploaded</Badge>
+                          <a className="button button-secondary" href={reportDownloadUrl(report.id)} target="_blank" rel="noreferrer">
+                            Download
+                          </a>
                         </article>
                       </Reveal>
                     ))
@@ -1605,7 +1699,7 @@ export function HomePage() {
                 {[
                   [Boolean(patient), "Patient profile saved"],
                   [canAnalyze, "At least one symptom or uploaded report"],
-                  [canUseAi, "Doctor or Admin access"],
+                  [canUseAi, "LLM configured"],
                 ].map(([ready, label]) => (
                   <div className="readiness-item" key={String(label)}>
                     {ready ? <CheckCircle2 size={17} /> : <Info size={17} />}
@@ -1635,8 +1729,7 @@ export function HomePage() {
               </Button>
               {!canUseAi ? (
                 <p className="access-note">
-                  Your {user?.role || "current"} role can record patient
-                  information. AI analysis requires Doctor or Admin access.
+                  <Link to="/settings/llm">Configure an LLM</Link> to run AI analysis.
                 </p>
               ) : null}
               {isAnalyzing ? (

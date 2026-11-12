@@ -20,8 +20,7 @@ def test_preflight_prepares_directories_without_creating_database(tmp_path):
         "LOCAL_STORAGE_PATH": str(tmp_path / "storage"),
         "BACKEND_HOST": "127.0.0.1",
         "BACKEND_PORT": "8123",
-        "AI_PROVIDER": "openai",
-        "OPENAI_API_KEY": "",
+        "LLM_ENCRYPTION_KEY": "",
     }
     result = subprocess.run([sys.executable, str(ROOT / "scripts" / "check_environment.py"), "--json"], cwd=tmp_path, env=environment, capture_output=True, text=True)
     assert result.returncode == 0, result.stderr

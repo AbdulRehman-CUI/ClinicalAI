@@ -1,5 +1,7 @@
 # ClinicalAI - Phase 12 Deployment
 
+> This document records an earlier project phase. For current workspace credentials and deployment settings, see the [guest workspace guide](GUEST_WORKSPACES.md) and [Vercel deployment guide](VERCEL_DEPLOYMENT.md).
+
 ## Objective
 
 Prepare the ClinicalAI application for production deployment without changing any existing business logic.

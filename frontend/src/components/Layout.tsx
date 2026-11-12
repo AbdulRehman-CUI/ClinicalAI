@@ -4,19 +4,15 @@ import {
   ArrowUpRight,
   ChevronRight,
   LayoutDashboard,
-  LogIn,
-  LogOut,
+  KeyRound,
   Menu,
   Stethoscope,
-  UserPlus,
   X,
 } from "lucide-react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
-import { useAuth } from "../contexts/AuthContext";
 import { Brand } from "./WorkspaceUI";
 
 export function Layout() {
-  const { isAuthenticated, user, logout } = useAuth();
   const { pathname } = useLocation();
   const [menuOpen, setMenuOpen] = useState(false);
   const main = useRef<HTMLElement>(null);
@@ -40,15 +36,14 @@ export function Layout() {
     window.addEventListener("keydown", close);
     return () => window.removeEventListener("keydown", close);
   }, [menuOpen]);
-  const authPage = pathname === "/login" || pathname === "/register";
   return (
-    <div className={`app-shell ${authPage ? "auth-shell" : ""}`}>
+    <div className="app-shell">
       <a className="skip-link" href="#main-content">
         Skip to content
       </a>
       <header className="app-header">
         <NavLink
-          to={isAuthenticated ? "/" : "/login"}
+          to="/"
           aria-label="ClinicalAI home"
           className="brand-link"
         >
@@ -59,42 +54,11 @@ export function Layout() {
           Clinical workspace
           <ChevronRight size={13} />
           <span>
-            {authPage
-              ? "Account access"
-              : pathname === "/status"
-                ? "System health"
-                : "Patient intake"}
+            {pathname === "/status" ? "System health" : pathname === "/settings/llm" ? "LLM settings" : "Patient intake"}
           </span>
         </span>
         <div className="header-account">
-          {isAuthenticated ? (
-            <>
-              <span className="avatar">
-                {(user?.full_name || user?.email || "C")
-                  .slice(0, 1)
-                  .toUpperCase()}
-              </span>
-              <span className="account-name">
-                {user?.full_name || user?.email}
-                <small>{user?.role}</small>
-              </span>
-              <button
-                className="icon-button logout-button"
-                type="button"
-                onClick={logout}
-                aria-label="Log out"
-                title="Log out"
-              >
-                <LogOut size={18} />
-                <span>Log out</span>
-              </button>
-            </>
-          ) : (
-            <span className="header-tag">
-              <Stethoscope size={16} />
-              Built for clinical clarity
-            </span>
-          )}
+          <span className="header-tag"><Stethoscope size={16} /> Private guest workspace</span>
         </div>
         <button
           id="menu-toggle"
@@ -114,16 +78,11 @@ export function Layout() {
       >
         <div className="sidebar-section-label">WORKSPACE</div>
         <nav aria-label="Primary navigation">
-          {(isAuthenticated
-            ? [
-                { to: "/", label: "Patient workspace", icon: LayoutDashboard },
-                { to: "/status", label: "System health", icon: Activity },
-              ]
-            : [
-                { to: "/login", label: "Sign in", icon: LogIn },
-                { to: "/register", label: "Create account", icon: UserPlus },
-              ]
-          ).map(({ to, label, icon: Icon }) => (
+          {[
+            { to: "/", label: "Patient workspace", icon: LayoutDashboard },
+            { to: "/settings/llm", label: "LLM settings", icon: KeyRound },
+            { to: "/status", label: "System health", icon: Activity },
+          ].map(({ to, label, icon: Icon }) => (
             <NavLink
               end
               key={to}

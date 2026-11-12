@@ -5,9 +5,10 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Any
 
+import httpx
+
 from app.core.config import Settings, get_settings
-import logging
-import json
+from app.services.exceptions import LLMRequestError
 
 try:
     from google import genai
@@ -25,34 +26,40 @@ except ImportError:  # pragma: no cover - handled during dependency installation
 class BaseAIProvider(ABC):
     """Abstract interface for AI backends used by the analysis pipeline."""
 
-    def __init__(self, settings: Settings | None = None) -> None:
+    def __init__(self, model: str, api_key: str, *, settings: Settings | None = None, client: Any = None) -> None:
         self.settings = settings or get_settings()
+        self.model = model
+        self.api_key = api_key
+        self.client = client
 
     @abstractmethod
     def generate_content(self, *, system_prompt: str, user_prompt: str) -> str:
         """Return the raw text response generated from the supplied prompts."""
 
+    @abstractmethod
+    def test_connection(self) -> None:
+        """Make a small model request without clinical data."""
+
 
 class OpenAIProvider(BaseAIProvider):
     """Use OpenAI's Responses API for AI analysis generation."""
 
-    def __init__(self, settings: Settings | None = None, client: Any | None = None) -> None:
-        super().__init__(settings=settings)
-        self.client = client
-
     def _get_client(self) -> Any:
         if self.client is not None:
             return self.client
-        if not self.settings.openai_api_key:
-            raise RuntimeError("OpenAI API key is not configured.")
         if OpenAI is None:
             raise RuntimeError("The OpenAI SDK is not available.")
-        return OpenAI(api_key=self.settings.openai_api_key)
+        return OpenAI(api_key=self.api_key, base_url="https://api.openai.com/v1", max_retries=0)
+
+    def test_connection(self) -> None:
+        self._get_client().responses.create(
+            model=self.model, input="Reply OK.", max_output_tokens=16, timeout=12, store=False,
+        )
 
     def generate_content(self, *, system_prompt: str, user_prompt: str) -> str:
         client = self._get_client()
         response = client.responses.create(
-            model=self.settings.openai_model,
+            model=self.model,
             input=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
@@ -60,6 +67,7 @@ class OpenAIProvider(BaseAIProvider):
             temperature=self.settings.openai_temperature,
             timeout=self.settings.openai_timeout,
             max_output_tokens=self.settings.max_ai_tokens,
+            store=False,
         )
         return getattr(response, "output_text", "") or ""
 
@@ -67,24 +75,31 @@ class OpenAIProvider(BaseAIProvider):
 class GeminiProvider(BaseAIProvider):
     """Use Google's Gemini API for AI analysis generation."""
 
-    def __init__(self, settings: Settings | None = None, client: Any | None = None) -> None:
-        super().__init__(settings=settings)
-        self.client = client
-
-    def _get_client(self) -> Any:
+    def _get_client(self, timeout: int | None = None) -> Any:
         if self.client is not None:
             return self.client
-        if not self.settings.gemini_api_key:
-            raise RuntimeError("Gemini API key is not configured.")
         if genai is None:
             raise RuntimeError("The Google GenAI SDK is not available.")
-        return genai.Client(api_key=self.settings.gemini_api_key)
+        return genai.Client(
+            vertexai=False,
+            api_key=self.api_key,
+            http_options=types.HttpOptions(
+                base_url="https://generativelanguage.googleapis.com",
+                timeout=(timeout or self.settings.openai_timeout) * 1000,
+            ),
+        )
+
+    def test_connection(self) -> None:
+        self._get_client(timeout=12).models.generate_content(
+            model=self.model, contents="Reply OK.",
+            config=types.GenerateContentConfig(max_output_tokens=16),
+        )
 
     def generate_content(self, *, system_prompt: str, user_prompt: str) -> str:
         client = self._get_client()
 
         response = client.models.generate_content(
-            model=self.settings.gemini_model,
+            model=self.model,
             contents=user_prompt,
             config=types.GenerateContentConfig(
                 systemInstruction=system_prompt,
@@ -93,55 +108,38 @@ class GeminiProvider(BaseAIProvider):
             ),
         )
 
-        logger = logging.getLogger(__name__)
-
-        # Log raw SDK response for debugging compatibility differences
-        try:
-            # Attempt to serialize common response shapes
-            serialized = None
-            # If SDK response exposes a json-like dict
-            if hasattr(response, "to_dict") and callable(getattr(response, "to_dict")):
-                serialized = response.to_dict()
-            else:
-                # Collect common attributes
-                candidate_attrs = [
-                    "text",
-                    "candidates",
-                    "content",
-                    "outputs",
-                    "output",
-                    "response",
-                    "raw",
-                ]
-                info = {}
-                for attr in candidate_attrs:
-                    if hasattr(response, attr):
-                        try:
-                            val = getattr(response, attr)
-                            info[attr] = val
-                        except Exception:
-                            info[attr] = repr(getattr(response, attr))
-                # Also include a repr and dir for full visibility
-                info["repr"] = repr(response)
-                info["dir"] = [a for a in dir(response) if not a.startswith("__")]
-                serialized = info
-            try:
-                logger.debug("Raw Gemini SDK response: %s", json.dumps(serialized, default=str, ensure_ascii=False))
-            except Exception:
-                logger.debug("Raw Gemini SDK response (repr): %s", repr(serialized))
-        except Exception:
-            logger.exception("Failed to serialize Gemini SDK response for logging.")
-
         return getattr(response, "text", "") or ""
 
 
-def build_ai_provider(settings: Settings | None = None, client: Any | None = None) -> BaseAIProvider:
-    """Instantiate the configured AI provider based on application settings."""
-    resolved_settings = settings or get_settings()
-    provider_name = (resolved_settings.ai_provider or "openai").strip().lower()
-    print("AI Provider:", resolved_settings.ai_provider)
-    print("Gemini Model:", resolved_settings.gemini_model)
-    print("Gemini Key:", resolved_settings.gemini_api_key[:10] if resolved_settings.gemini_api_key else None)
-    if provider_name == "gemini":
-        return GeminiProvider(settings=resolved_settings, client=client)
-    return OpenAIProvider(settings=resolved_settings, client=client)
+PROVIDERS = {"openai": OpenAIProvider, "gemini": GeminiProvider}
+
+
+def build_ai_provider(provider: str, model: str, api_key: str) -> BaseAIProvider:
+    return PROVIDERS[provider](model, api_key)
+
+
+def provider_error(exc: Exception) -> LLMRequestError:
+    """Map SDK failures without returning provider bodies, URLs or headers."""
+    status = getattr(exc, "status_code", None) or getattr(exc, "code", None)
+    code = getattr(exc, "code", None)
+    details = getattr(exc, "details", None)
+    if isinstance(details, dict) and isinstance(details.get("error"), dict):
+        reasons = {
+            item["reason"] for item in details["error"].get("details") or []
+            if isinstance(item, dict) and isinstance(item.get("reason"), str)
+        }
+    else:
+        reasons = set()
+    if code in ("insufficient_quota", "billing_hard_limit_reached") or status == 402 or "BILLING_DISABLED" in reasons:
+        return LLMRequestError("llm_quota", "Your provider account has insufficient quota or credits.", 402)
+    if status in (401, 403) or code == "invalid_api_key" or "API_KEY_INVALID" in reasons:
+        return LLMRequestError("llm_invalid_key", "The provider rejected this API key or its permissions.", 422)
+    if status in (400, 404):
+        return LLMRequestError("llm_model_unavailable", "The selected model is unavailable to this key or rejected the request.", 422)
+    if status == 429:
+        return LLMRequestError("llm_rate_limited", "The provider is rate limiting this key. Try again later.", 429)
+    if status in (408, 504) or isinstance(exc, (httpx.TimeoutException, TimeoutError)) or type(exc).__name__ == "APITimeoutError":
+        return LLMRequestError("llm_timeout", "The provider request timed out.", 504)
+    if isinstance(exc, (httpx.NetworkError, ConnectionError)) or type(exc).__name__ == "APIConnectionError":
+        return LLMRequestError("llm_network", "Could not connect to the provider.", 503)
+    return LLMRequestError("llm_unavailable", "The AI provider is temporarily unavailable.", 503)

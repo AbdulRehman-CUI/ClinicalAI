@@ -7,30 +7,33 @@ from typing import Any
 
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import NullPool, StaticPool
 
 from app.core.config import get_settings
-import logging
-from app.db.base import Base
 
 settings = get_settings()
-
-connect_args = (
-    {"check_same_thread": False}
-    if settings.database_url.startswith("sqlite")
-    else {}
-)
+sqlite = settings.database_url.startswith("sqlite")
+pool_options = {
+    "pool_size": settings.database_pool_size,
+    "max_overflow": settings.database_max_overflow,
+    "pool_timeout": settings.database_pool_timeout,
+}
+if not sqlite:
+    # Neon already pools database connections. Avoid a second pool in each function instance.
+    pool_options = {"poolclass": NullPool}
+elif settings.resolve_database_path() is None:
+    pool_options = {"poolclass": StaticPool}
 
 engine = create_engine(
     settings.database_url,
-    connect_args=connect_args,
+    connect_args={"check_same_thread": False} if sqlite else {"connect_timeout": 10, "prepare_threshold": None},
     pool_pre_ping=True,
-    pool_size=settings.database_pool_size,
-    max_overflow=settings.database_max_overflow,
-    pool_timeout=settings.database_pool_timeout,
+    hide_parameters=True,
+    **pool_options,
 )
 
 
-if settings.database_url.startswith("sqlite"):
+if sqlite:
 
     @event.listens_for(engine, "connect")
     def enable_sqlite_foreign_keys(
@@ -45,19 +48,7 @@ if settings.database_url.startswith("sqlite"):
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-# Import models so the metadata is registered before creating tables.
-from app.db import models  # noqa: F401
-
-Base.metadata.create_all(bind=engine)
-
-
 def get_db() -> Generator[Session, None, None]:
-    """Yield a database session for future FastAPI dependencies."""
-    logger = logging.getLogger(__name__)
-    logger.debug("Creating new DB session")
-    db = SessionLocal()
-    try:
+    """Close the session and roll back any open transaction after each request."""
+    with SessionLocal() as db:
         yield db
-    finally:
-        db.close()
-        logger.debug("Closed DB session")

@@ -39,7 +39,7 @@ def main() -> int:
     except OSError:
         print("Cannot prepare database or upload directories. Check the configured paths and Windows folder permissions. No files were deleted.", file=sys.stderr)
         return 1
-    result = {"host": settings.host, "port": settings.port, "database": str(database) if database else "Configured external database", "upload_directory": str(uploads), "ai_provider": settings.ai_provider, "ai_configured": bool(settings.openai_api_key if settings.ai_provider == "openai" else settings.gemini_api_key)}
+    result = {"host": settings.host, "port": settings.port, "database": str(database) if database else "Configured external database", "upload_directory": str(uploads), "ai_configured": bool(settings.llm_encryption_key)}
     if args.json:
         print(json.dumps(result))
     else:
@@ -47,7 +47,7 @@ def main() -> int:
         print(f"Database location: {result['database']}")
         print(f"Uploads directory: {uploads}")
         if not result["ai_configured"]:
-            print(f"AI analysis requires the selected {settings.ai_provider} API key; it is not needed for login.")
+            print("Set LLM_ENCRYPTION_KEY to enable encrypted visitor LLM configuration.")
     return 0
 
 

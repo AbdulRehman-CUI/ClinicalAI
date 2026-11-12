@@ -1,5 +1,7 @@
 # Authentication failure investigation
 
+> Historical design for the retired account and role system. See the [guest workspace and BYOK guide](GUEST_WORKSPACES.md) for current access controls.
+
 The reproduced failure was in `GET /api/v1/auth/users/me`. Registration and login issued valid JWTs, then the frontend loaded this endpoint. `AuthService.get_current_user` converted the database row to `AuthUser`, discarding `created_at` and `updated_at`. The route converted that object to `UserRead`, where both fields are required, producing a Pydantic `ValidationError` and HTTP 500. `AuthUser` now inherits the complete safe profile schema.
 
 The local `LOG_FORMAT=json` also prevented a new backend process from starting: Python's percent-style logging formatter rejected the literal `json`. This mode now uses a standard-library JSON formatter. Existing percent-style formats continue to work.

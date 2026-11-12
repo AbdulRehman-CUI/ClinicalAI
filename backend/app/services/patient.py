@@ -8,11 +8,13 @@ import math
 from fastapi import Depends
 from sqlalchemy.orm import Session
 
+from app.db.models import ReportStorageDeletion
 from app.db.session import get_db
 from app.repositories.patient import PatientRepository
 from app.schemas.common import PaginationMeta
 from app.schemas.patient import PatientCreate, PatientRead, PatientUpdate
 from app.services.exceptions import ResourceNotFoundError
+from app.services.medical_report import purge_report_deletions
 
 
 class PatientService:
@@ -59,10 +61,19 @@ class PatientService:
 
     def delete(self, patient_id: int) -> None:
         """Delete one patient."""
-        instance = self.repository.get(patient_id)
+        instance = self.repository.get(patient_id, for_update=True)
         if instance is None:
             raise ResourceNotFoundError("Patient not found.")
+        db = self.repository.db
+        report_ids = [report.id for report in instance.medical_reports]
+        db.add_all(
+            ReportStorageDeletion(report_id=report.id, stored_filename=report.stored_filename,
+                                  workspace_id=self.repository.workspace_id)
+            for report in instance.medical_reports
+        )
         self.repository.delete(instance)
+        for report_id in report_ids:
+            purge_report_deletions(db, report_id, self.repository.workspace_id)
 
 
 def get_patient_service(db: Session = Depends(get_db)) -> PatientService:

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import json
 from typing import Any
 
 from fastapi import Depends
@@ -23,10 +22,11 @@ from app.repositories.patient import PatientRepository
 from app.repositories.symptom import SymptomRepository
 from app.services.exceptions import (
     AIResponseValidationError,
-    AIServiceUnavailableError,
     ResourceNotFoundError,
     ValidationError,
 )
+from app.services.llm import configured_provider
+from app.ai.providers import provider_error
 
 logger = logging.getLogger(__name__)
 
@@ -55,14 +55,14 @@ class AnalysisService:
         self.symptom_repository = symptom_repository
         self.report_repository = report_repository
         self.analysis_repository = analysis_repository
-        self.engine = engine or AIEngine()
+        self.engine = engine
         self.context_builder = context_builder or PatientContextBuilder()
         self.prompt_builder = prompt_builder or PromptBuilder()
         self.response_parser = response_parser or ResponseParser()
 
     def analyze_patient(self, patient_id: int) -> dict[str, Any]:
         """Build context, call the AI engine, validate the response, and persist it."""
-        logger.info("Analysis started for patient %s", patient_id)
+        logger.info("Analysis started")
         patient = self.patient_repository.get(patient_id)
         if patient is None:
             raise ResourceNotFoundError("Patient not found.")
@@ -88,99 +88,19 @@ class AnalysisService:
             reports=report_text,
         )
 
+        engine = self.engine or AIEngine(provider=configured_provider(self.analysis_repository.db))
         try:
-            parsed_response = self.engine.analyze(context)
-        except Exception as exc:  # pragma: no cover - exercised through dependency injection in tests
-            # Attempt to surface original SDK/HTTP details for debugging (status, body, url, model, type)
-            exc_type = type(exc).__name__
-
-            model_name = None
-            try:
-                provider = getattr(self.engine, "provider", None)
-                if provider is not None:
-                    settings = getattr(provider, "settings", None)
-                    if settings is not None:
-                        model_name = getattr(settings, "gemini_model", None) or getattr(settings, "openai_model", None)
-            except Exception:
-                model_name = None
-
-            # Try to find a response-like object on the exception by common attribute names
-            response_obj = None
-            for attr in ("response", "raw_response", "http_response", "resp", "response_body"):
-                response_obj = getattr(exc, attr, None)
-                if response_obj is not None:
-                    break
-
-            status_code = None
-            request_url = None
-            response_body = None
-
-            if response_obj is not None:
-                # Status code: requests.Response uses .status_code, others may use .status
-                status_code = getattr(response_obj, "status_code", getattr(response_obj, "status", None))
-
-                # Try to get JSON body exactly as returned by the SDK/HTTP layer
-                try:
-                    if hasattr(response_obj, "json") and callable(response_obj.json):
-                        response_body = response_obj.json()
-                    elif hasattr(response_obj, "text"):
-                        response_body = response_obj.text
-                    elif hasattr(response_obj, "content"):
-                        response_body = response_obj.content
-                    else:
-                        response_body = repr(response_obj)
-                except Exception:
-                    # Fall back to string representation if .json() or reading fails
-                    try:
-                        response_body = response_obj.text
-                    except Exception:
-                        response_body = repr(response_obj)
-
-                # Request URL: requests.Response.request.url or .url
-                req = getattr(response_obj, "request", None)
-                if req is not None:
-                    request_url = getattr(req, "url", None)
-                request_url = request_url or getattr(response_obj, "url", None)
-            else:
-                # No nested response object; inspect exception attributes directly
-                status_code = getattr(exc, "status_code", getattr(exc, "status", None))
-                request_url = getattr(exc, "url", None)
-                response_body = getattr(exc, "body", getattr(exc, "details", None) or getattr(exc, "message", None))
-
-            # Normalize bytes to string for logging
-            if isinstance(response_body, (bytes, bytearray)):
-                try:
-                    response_body = response_body.decode("utf-8")
-                except Exception:
-                    response_body = repr(response_body)
-
-            # If response_body is a dict/list (from .json()), pretty-print it to preserve exact JSON
-            if isinstance(response_body, (dict, list)):
-                try:
-                    response_body_str = json.dumps(response_body, ensure_ascii=False)
-                except Exception:
-                    response_body_str = str(response_body)
-            else:
-                response_body_str = str(response_body)
-
-            logger.error(
-                "AI engine exception for patient %s: type=%s model=%s status=%s url=%s response=%s",
-                patient_id,
-                exc_type,
-                model_name,
-                status_code,
-                request_url,
-                response_body_str,
-                exc_info=True,
-            )
-
-            # Preserve existing user-facing behavior (wrap original exception)
-            raise AIServiceUnavailableError("AI service temporarily unavailable.") from exc
+            parsed_response = engine.analyze(context)
+        except ValueError as exc:
+            raise AIResponseValidationError("AI response was malformed or incomplete.") from exc
+        except Exception as exc:
+            logger.error("AI provider request failed (%s)", type(exc).__name__)
+            raise provider_error(exc) from None
 
         try:
             validated_response = self.response_parser.parse(parsed_response)
         except Exception as exc:  # pragma: no cover - exercised through dependency injection in tests
-            logger.warning("AI response validation failed for patient %s", patient_id)
+            logger.warning("AI response validation failed")
             raise AIResponseValidationError("AI response was malformed or incomplete.") from exc
 
         report_id = reports[0].id if reports else None
@@ -197,7 +117,7 @@ class AnalysisService:
             }
         )
 
-        logger.info("Analysis completed for patient %s with analysis_id %s", patient_id, instance.id)
+        logger.info("Analysis completed")
         return {
             "analysis_id": instance.id,
             "patient_id": patient_id,
@@ -206,8 +126,7 @@ class AnalysisService:
         }
 
     def _load_related_records(self, patient_id: int, repository: Any) -> list[Any]:
-        items = repository.list(offset=0, limit=1000)
-        return [item for item in items if getattr(item, "patient_id", None) == patient_id]
+        return repository.list(offset=0, limit=1000, patient_id=patient_id)
 
     def _collect_report_text(self, reports: list[Any]) -> str:
         parts: list[str] = []

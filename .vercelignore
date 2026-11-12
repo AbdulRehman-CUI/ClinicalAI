@@ -1,0 +1,10 @@
+.env
+.env.*
+**/.env
+**/.env.*
+.venv.backup*/
+backend/data/
+frontend/dist/
+frontend/test-results/
+frontend/playwright-report/
+*.log

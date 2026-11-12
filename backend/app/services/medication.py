@@ -42,10 +42,9 @@ class MedicationService:
         """Return paginated medications for one patient."""
         self._ensure_patient_exists(patient_id)
         offset = (page - 1) * page_size
-        total_items = self.medication_repository.count()
-        instances: Sequence = self.medication_repository.list(offset=offset, limit=page_size)
-        items = [MedicationRead.model_validate(instance) for instance in instances if instance.patient_id == patient_id]
-        total_items = len(items)
+        total_items = self.medication_repository.count(patient_id=patient_id)
+        instances: Sequence = self.medication_repository.list(offset=offset, limit=page_size, patient_id=patient_id)
+        items = [MedicationRead.model_validate(instance) for instance in instances]
         total_pages = math.ceil(total_items / page_size) if total_items else 1
         pagination = PaginationMeta(
             page=page,

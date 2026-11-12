@@ -1,5 +1,7 @@
 # 13. Configuration Guide
 
+> This document records an earlier project phase. For current workspace credentials and deployment settings, see the [guest workspace guide](GUEST_WORKSPACES.md) and [Vercel deployment guide](VERCEL_DEPLOYMENT.md).
+
 ## ClinicalAI Configuration Standard
 
 Version: 1.0

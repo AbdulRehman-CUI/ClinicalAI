@@ -43,3 +43,18 @@ class MedicalReportRead(MedicalReportBase):
 
     id: int
     upload_timestamp: datetime
+
+
+class ReportUploadRequest(BaseModel):
+    filename: str = Field(min_length=1, max_length=255)
+    size: int = Field(gt=0)
+
+
+class ReportUploadIntent(BaseModel):
+    token: str
+    url: str
+    fields: dict[str, str]
+
+
+class ReportUploadCompletion(BaseModel):
+    token: str = Field(min_length=1, max_length=4096)

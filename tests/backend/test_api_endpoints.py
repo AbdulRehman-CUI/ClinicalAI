@@ -13,20 +13,7 @@ from app.db import session as db_session_module
 from app.main import app
 
 
-def get_auth_headers(client: TestClient) -> dict[str, str]:
-    """Register a default user and return bearer auth headers for protected API calls."""
-    register_response = client.post(
-        "/api/v1/auth/register",
-        json={
-            "full_name": "Test Admin",
-            "email": "admin@example.com",
-            "password": "SecurePass123!",
-            "role": "Admin",
-        },
-    )
-    assert register_response.status_code == 201
-    access_token = register_response.json()["data"]["access_token"]
-    return {"Authorization": f"Bearer {access_token}"}
+from tests.backend.workspace_helpers import start_workspace
 
 
 @pytest.fixture()
@@ -61,7 +48,7 @@ def client() -> TestClient:
 
 def test_patient_crud_flow(client: TestClient) -> None:
     """Patients should be created and listed using the documented response envelope."""
-    headers = get_auth_headers(client)
+    headers = start_workspace(client)
     response = client.post(
         "/api/v1/patients",
         json={
@@ -91,7 +78,7 @@ def test_patient_crud_flow(client: TestClient) -> None:
 
 def test_medical_history_flow(client: TestClient) -> None:
     """Patient-scoped medical history endpoints should work with the documented envelope."""
-    headers = get_auth_headers(client)
+    headers = start_workspace(client)
     patient_response = client.post(
         "/api/v1/patients",
         json={
@@ -131,7 +118,7 @@ def test_medical_history_flow(client: TestClient) -> None:
 
 def test_patient_scoped_resources_use_path_patient_id_in_create_contract(client: TestClient) -> None:
     """All patient-scoped create endpoints should accept patient_id from the path only."""
-    headers = get_auth_headers(client)
+    headers = start_workspace(client)
     patient_response = client.post(
         "/api/v1/patients",
         json={

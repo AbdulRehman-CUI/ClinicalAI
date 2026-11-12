@@ -7,7 +7,7 @@ Create Date: 2026-08-03
 
 from __future__ import annotations
 
-from alembic import op
+from alembic import context, op
 import sqlalchemy as sa
 
 revision = "20260803_0001"
@@ -18,9 +18,7 @@ depends_on = None
 
 def upgrade() -> None:
     """Create the users table if it does not already exist."""
-    bind = op.get_bind()
-    inspector = sa.inspect(bind)
-    if "users" in inspector.get_table_names():
+    if not context.is_offline_mode() and sa.inspect(op.get_bind()).has_table("users"):
         return
 
     op.create_table(
@@ -52,9 +50,7 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     """Drop the users table if it exists."""
-    bind = op.get_bind()
-    inspector = sa.inspect(bind)
-    if "users" not in inspector.get_table_names():
+    if not context.is_offline_mode() and not sa.inspect(op.get_bind()).has_table("users"):
         return
 
     op.drop_index("ix_users_email", table_name="users")

@@ -15,9 +15,16 @@ class ValidationError(ServiceError):
     """Raised when a service operation cannot proceed because the input is invalid."""
 
 
-class AIServiceUnavailableError(ServiceError):
-    """Raised when the upstream AI provider cannot fulfill the request."""
-
-
 class AIResponseValidationError(ServiceError):
     """Raised when the AI provider returns malformed or incomplete data."""
+
+
+class StorageUnavailableError(ServiceError):
+    """Raised when report storage cannot complete an operation."""
+
+
+class LLMRequestError(ServiceError):
+    def __init__(self, code: str, message: str, status_code: int) -> None:
+        super().__init__(message)
+        self.code = code
+        self.status_code = status_code

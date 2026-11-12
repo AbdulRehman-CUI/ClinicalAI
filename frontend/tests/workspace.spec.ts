@@ -1,15 +1,6 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
 
 // Synthetic records are confined to intercepted test requests. No real service is called.
-const user = {
-  id: 1,
-  full_name: "Test Clinician",
-  email: "clinician@example.test",
-  role: "Doctor",
-  is_active: true,
-  created_at: "2026-01-01",
-  updated_at: "2026-01-01",
-};
 const patient = {
   id: 12,
   first_name: "Test",
@@ -44,7 +35,9 @@ const result = {
 const ok = (route: Route, data: unknown) =>
   route.fulfill({ json: { success: true, message: "", data } });
 
-async function api(page: Page, role = "Doctor") {
+async function api(page: Page, configured = true) {
+  let llm = { configured, provider: "openai", model: "gpt-4.1-mini", has_api_key: configured, tested: configured, remember: false };
+  let savedPatient: typeof patient | null = null;
   const requests: { path: string; method: string; body: unknown }[] = [];
   await page.route("**/api/v1/**", async (route) => {
     const request = route.request();
@@ -65,13 +58,25 @@ async function api(page: Page, role = "Doctor") {
     }
     const body = request.postData() ? request.postDataJSON() : null;
     requests.push({ path, method: request.method(), body });
-    if (path === "/auth/users/me") return ok(route, { ...user, role });
-    if (path === "/auth/login" || path === "/auth/register")
-      return ok(route, {
-        access_token: "test-access-token",
-        refresh_token: "test-refresh-token",
-      });
-    if (path === "/patients") return ok(route, { ...patient, ...body });
+    if (path === "/workspace") return route.fulfill({ status: 204 });
+    if (path === "/llm/providers") return ok(route, { openai: ["gpt-4.1-mini", "gpt-4o-mini"], gemini: ["gemini-3.6-flash"] });
+    if (path === "/llm/config") {
+      if (request.method() === "DELETE") {
+        llm = { ...llm, configured: false, has_api_key: false, tested: false };
+        return route.fulfill({ status: 204 });
+      }
+      if (request.method() === "PUT") llm = {
+        configured: true, provider: body.provider, model: body.model, has_api_key: true,
+        tested: true, remember: body.remember,
+      };
+      return ok(route, llm);
+    }
+    if (path === "/llm/test") return ok(route, { tested: true });
+    if (path === "/patients") {
+      if (request.method() === "GET") return ok(route, savedPatient ? [savedPatient] : []);
+      savedPatient = { ...patient, ...body };
+      return ok(route, savedPatient);
+    }
     if (path === "/patients/12" && request.method() === "PUT")
       return ok(route, { ...patient, ...body });
     if (path === "/patients/12/analyze") return ok(route, result);
@@ -81,20 +86,6 @@ async function api(page: Page, role = "Doctor") {
     return ok(route, []);
   });
   return requests;
-}
-
-async function session(page: Page, role = "Doctor") {
-  await page.addInitScript(
-    ({ user, role }) => {
-      sessionStorage.setItem("clinicalai_access_token", "test-access-token");
-      sessionStorage.setItem("clinicalai_refresh_token", "test-refresh-token");
-      sessionStorage.setItem(
-        "clinicalai_user",
-        JSON.stringify({ ...user, role }),
-      );
-    },
-    { user, role },
-  );
 }
 
 async function createPatient(page: Page) {
@@ -121,48 +112,54 @@ async function addSymptom(page: Page) {
   await expect(form.locator("input").first()).toHaveValue("");
 }
 
-test("protected routes redirect, sign in and logout preserve routing", async ({
-  page,
-}) => {
-  const requests = await api(page);
-  await page.goto("/status");
-  await expect(page).toHaveURL(/\/login$/);
-  await page.getByLabel(/^Email address/).fill(user.email);
-  await page.getByLabel(/^Password/).fill("test-password");
-  await page.getByRole("button", { name: "Show password" }).click();
-  await expect(page.getByLabel(/^Password/)).toHaveAttribute("type", "text");
-  await page.getByRole("button", { name: "Sign in", exact: true }).click();
-  await expect(
-    page.getByRole("heading", { name: /A clearer picture/ }),
-  ).toBeVisible();
-  expect(
-    requests.some((r) => r.path === "/auth/login" && r.method === "POST"),
-  ).toBeTruthy();
-  await page.getByRole("button", { name: "Log out", exact: true }).click();
-  await expect(page).toHaveURL(/\/login$/);
+test("dashboard and status open without a registered account", async ({ page }) => {
+  const requests = await api(page, false);
   await page.goto("/");
-  await expect(page).toHaveURL(/\/login$/);
+  await expect(page.getByRole("form", { name: "Patient profile" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Configure LLM" })).toBeVisible();
+  await expect(page.getByText("LLM Not Configured")).toBeVisible();
+  expect(requests.filter((r) => r.path === "/workspace")).toHaveLength(1);
+  expect(requests.some((r) => r.path.startsWith("/auth/"))).toBe(false);
+  await page.goto("/status");
+  await page.reload();
+  await expect(page).toHaveURL(/\/status$/);
+  await page.goto("/login");
+  await expect(page.getByRole("form", { name: "Patient profile" })).toBeVisible();
 });
 
-test("registration submits the existing role and token contract", async ({
-  page,
-}) => {
-  const requests = await api(page, "Staff");
-  await page.goto("/register");
-  await page.getByLabel(/^Full name/).fill("Test Clinician");
-  await page.getByLabel(/^Email address/).fill(user.email);
-  await page.getByLabel(/^Password/).fill("test-password");
-  await page.getByLabel(/^Clinical role/).selectOption("Staff");
-  await page
-    .getByRole("button", { name: "Create account", exact: true })
-    .click();
-  await expect(page).toHaveURL(/\/$/);
-  expect(requests.find((r) => r.path === "/auth/register")?.body).toEqual({
-    full_name: "Test Clinician",
-    email: user.email,
-    password: "test-password",
-    role: "Staff",
+test("guest can test, save, replace and remove their LLM settings", async ({ page }) => {
+  const requests = await api(page, false);
+  await page.goto("/");
+  await page.getByRole("link", { name: "Configure LLM" }).click();
+  await expect(page).toHaveURL(/\/settings\/llm$/);
+  await page.getByLabel(/^Provider/).selectOption("gemini");
+  await page.getByLabel(/^Model/).selectOption("gemini-3.6-flash");
+  const key = page.getByLabel(/^API key/);
+  await key.fill("synthetic-gemini-key");
+  await expect(key).toHaveAttribute("type", "password");
+  await page.getByRole("button", { name: "Show key" }).click();
+  await expect(key).toHaveAttribute("type", "text");
+  await page.getByRole("button", { name: "Test connection" }).click();
+  await expect(page.getByRole("status")).toContainText("Connection tested");
+  await page.getByRole("button", { name: "Save configuration" }).click();
+  await expect(page.getByRole("status")).toContainText("configuration saved");
+  await expect(key).toHaveValue("");
+  await page.reload();
+  await expect(page.getByText("LLM Configured", { exact: true })).toBeVisible();
+  await expect(key).toHaveValue("");
+  await key.fill("synthetic-replacement-key");
+  await page.getByLabel(/Remember this encrypted key/).check();
+  await page.getByRole("button", { name: "Save configuration" }).click();
+  await expect(page.getByRole("status")).toContainText("configuration saved");
+  const put = requests.filter((r) => r.path === "/llm/config" && r.method === "PUT");
+  expect(put.at(-1)?.body).toEqual({
+    provider: "gemini", model: "gemini-3.6-flash", api_key: "synthetic-replacement-key", remember: true,
   });
+  await page.getByRole("link", { name: "Patient workspace" }).click();
+  await expect(page.getByRole("link", { name: "Manage LLM" })).toBeVisible();
+  await page.getByRole("link", { name: "Manage LLM" }).click();
+  await page.getByRole("button", { name: "Remove configuration" }).click();
+  await expect(page.getByRole("status")).toContainText("configuration removed");
 });
 
 test("patient validation, every clinical form, profile editing, analysis objects and reset", async ({
@@ -171,13 +168,12 @@ test("patient validation, every clinical form, profile editing, analysis objects
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
   const requests = await api(page);
-  await session(page);
   await page.goto("/");
   await expect(page.getByLabel(/^First name/)).toHaveValue("");
   await page
     .getByRole("button", { name: "Create patient", exact: true })
     .click();
-  expect(requests.filter((r) => r.path === "/patients")).toHaveLength(0);
+  expect(requests.filter((r) => r.path === "/patients" && r.method === "POST")).toHaveLength(0);
   await createPatient(page);
   const history = page.getByRole("form", {
     name: "Medical history",
@@ -245,11 +241,61 @@ test("patient validation, every clinical form, profile editing, analysis objects
   expect(errors).toEqual([]);
 });
 
+test("direct report upload keeps workspace credentials off the storage request", async ({ page }) => {
+  test.skip(process.env.VITE_DIRECT_REPORT_UPLOADS !== "true", "requires the hosted upload setting");
+  await api(page);
+  const storageURL = "https://storage.example.test/upload";
+  const file = Buffer.alloc(5 * 1024 * 1024, "x");
+  const steps: string[] = [];
+
+  await page.route("**/reports/upload-intent", async (route) => {
+    const request = route.request();
+    expect(request.headers()["x-clinicalai-request"]).toBe("1");
+    expect(request.postDataJSON()).toEqual({ filename: "direct.txt", size: file.length });
+    steps.push("authorize");
+    return ok(route, { token: "upload-intent", url: storageURL, fields: { key: "pending-reports/opaque.txt" } });
+  });
+  await page.route(storageURL, async (route) => {
+    const request = route.request();
+    const headers = { "access-control-allow-origin": "*" };
+    if (request.method() === "OPTIONS") {
+      return route.fulfill({ status: 204, headers: { ...headers, "access-control-allow-methods": "POST" } });
+    }
+    expect(request.method()).toBe("POST");
+    expect(request.headers().authorization).toBeUndefined();
+    expect(request.headers()["x-clinicalai-request"]).toBeUndefined();
+    expect(request.headers().cookie).toBeUndefined();
+    expect(request.postDataBuffer()!.length).toBeGreaterThan(file.length);
+    expect(request.postData()!.slice(0, 512)).toContain("pending-reports/opaque.txt");
+    steps.push("upload");
+    return route.fulfill({ status: 204, headers });
+  });
+  await page.route("**/reports/complete", async (route) => {
+    const request = route.request();
+    expect(request.headers()["x-clinicalai-request"]).toBe("1");
+    expect(request.postDataJSON()).toEqual({ token: "upload-intent" });
+    steps.push("complete");
+    return ok(route, {
+      id: 21, patient_id: 12, original_filename: "direct.txt", file_type: "TXT",
+      upload_timestamp: "2026-01-01T10:00:00Z",
+    });
+  });
+
+  await page.goto("/");
+  await createPatient(page);
+  await page.getByRole("button", { name: /03 Medical reports/ }).click();
+  await page.getByLabel("Choose medical report").setInputFiles({
+    name: "direct.txt", mimeType: "text/plain", buffer: file,
+  });
+  await page.getByRole("button", { name: "Upload report", exact: true }).click();
+  await expect(page.locator(".document-card")).toContainText("direct.txt");
+  expect(steps).toEqual(["authorize", "upload", "complete"]);
+});
+
 test("report keyboard selection, removal, upload, and report-only analysis readiness", async ({
   page,
 }) => {
   const requests = await api(page);
-  await session(page);
   await page.goto("/");
   await createPatient(page);
   await page.getByRole("button", { name: /03 Medical reports/ }).click();
@@ -290,176 +336,31 @@ test("report keyboard selection, removal, upload, and report-only analysis readi
   ).toBeEnabled();
 });
 
-test("Staff cannot run analysis", async ({ page }) => {
-  await api(page, "Staff");
-  await session(page, "Staff");
+test("analysis stays disabled until a visitor configures an LLM", async ({ page }) => {
+  const requests = await api(page, false);
   await page.goto("/");
   await createPatient(page);
   await addSymptom(page);
   await page.getByRole("button", { name: /04 AI analysis/ }).click();
-  await expect(
-    page.getByRole("button", { name: "Run clinical analysis" }),
-  ).toBeDisabled();
-  await expect(page.getByText(/Your Staff role/)).toBeVisible();
+  await expect(page.getByRole("button", { name: "Run clinical analysis" })).toBeDisabled();
+  await page.getByRole("link", { name: "Configure an LLM" }).click();
+  await expect(page).toHaveURL(/\/settings\/llm$/);
+  expect(requests.some((r) => r.path.endsWith("/analyze"))).toBe(false);
 });
 
-test("profile failure cannot authenticate a decoded JWT", async ({ page }) => {
+test("a returning visitor can open a saved patient after refresh", async ({ page }) => {
   await api(page);
-  const token = `header.${Buffer.from(JSON.stringify({ sub: "1", role: "Doctor" })).toString("base64url")}.signature`;
-  await page.route("**/api/v1/auth/login", (route) =>
-    ok(route, { access_token: token, refresh_token: "test-refresh" }),
-  );
-  await page.route("**/api/v1/auth/users/me", (route) =>
-    route.fulfill({
-      status: 500,
-      json: {
-        message: "Internal server error",
-        detail: "sensitive server details",
-      },
-    }),
-  );
-  await page.goto("/login");
-  await page.getByLabel(/^Email address/).fill(user.email);
-  await page.getByLabel(/^Password/).fill("test-password");
-  await page.getByRole("button", { name: "Sign in", exact: true }).click();
-  await expect(page.getByRole("alert")).toContainText(
-    "ClinicalAI could not complete the request",
-  );
-  await expect(page.getByRole("alert")).not.toContainText(
-    "sensitive server details",
-  );
-  await expect(page).toHaveURL(/\/login$/);
-  expect(
-    await page.evaluate(() =>
-      sessionStorage.getItem("clinicalai_access_token"),
-    ),
-  ).toBeNull();
-});
-
-test("cached users cannot bypass failed server validation", async ({
-  page,
-}) => {
-  await api(page);
-  await session(page);
-  await page.route("**/api/v1/auth/users/me", (route) =>
-    route.fulfill({ status: 401, json: { message: "Invalid token" } }),
-  );
-  await page.route("**/api/v1/auth/refresh", (route) =>
-    route.fulfill({ status: 401, json: { message: "Invalid refresh token" } }),
-  );
-  await page.goto("/");
-  await expect(page).toHaveURL(/\/login$/);
-  await expect(
-    page.getByRole("heading", { name: /A clearer picture/ }),
-  ).not.toBeVisible();
-  expect(
-    await page.evaluate(() => sessionStorage.getItem("clinicalai_user")),
-  ).toBeNull();
-});
-
-test("an expired stored session is refreshed and validated before access", async ({
-  page,
-}) => {
-  await api(page);
-  await session(page);
-  let refreshes = 0;
-  await page.route("**/api/v1/auth/users/me", (route) =>
-    route.request().headers().authorization === "Bearer renewed-access"
-      ? ok(route, user)
-      : route.fulfill({ status: 401, json: { message: "Expired token" } }),
-  );
-  await page.route("**/api/v1/auth/refresh", (route) => {
-    refreshes++;
-    return ok(route, {
-      access_token: "renewed-access",
-      refresh_token: "renewed-refresh",
-    });
-  });
-  await page.goto("/");
-  await expect(
-    page.getByRole("heading", { name: /A clearer picture/ }),
-  ).toBeVisible();
-  expect(refreshes).toBe(1);
-  expect(
-    await page.evaluate(() =>
-      sessionStorage.getItem("clinicalai_access_token"),
-    ),
-  ).toBe("renewed-access");
-});
-
-test("an expired API request renews the session and retries once", async ({
-  page,
-}) => {
-  await api(page);
-  await session(page);
-  let attempts = 0;
-  await page.route("**/api/v1/patients", (route) => {
-    attempts++;
-    return attempts === 1
-      ? route.fulfill({ status: 401, json: { message: "Expired token" } })
-      : ok(route, { ...patient, ...route.request().postDataJSON() });
-  });
-  await page.route("**/api/v1/auth/refresh", (route) =>
-    ok(route, {
-      access_token: "renewed-access",
-      refresh_token: "renewed-refresh",
-    }),
-  );
   await page.goto("/");
   await createPatient(page);
-  expect(attempts).toBe(2);
-  expect(
-    await page.evaluate(() =>
-      sessionStorage.getItem("clinicalai_access_token"),
-    ),
-  ).toBe("renewed-access");
-});
-
-test("logout cannot be undone by an in-flight token renewal", async ({
-  page,
-}) => {
-  await api(page);
-  await session(page);
-  let release: () => void = () => {};
-  const held = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  let renewalStarted: () => void = () => {};
-  const started = new Promise<void>((resolve) => {
-    renewalStarted = resolve;
-  });
-  await page.route("**/api/v1/health", (route) =>
-    route.fulfill({ status: 401, json: { message: "Expired token" } }),
-  );
-  await page.route("**/api/v1/auth/refresh", async (route) => {
-    renewalStarted();
-    await held;
-    return ok(route, {
-      access_token: "late-access",
-      refresh_token: "late-refresh",
-    });
-  });
-  await page.goto("/status");
-  await page.getByRole("button", { name: "Run health check" }).click();
-  await started;
-  await page.getByRole("button", { name: "Log out", exact: true }).click();
-  release();
-  await expect(page).toHaveURL(/\/login$/);
-  await expect(
-    page.getByRole("heading", { name: "Welcome back." }),
-  ).toBeVisible();
-  expect(
-    await page.evaluate(() =>
-      sessionStorage.getItem("clinicalai_access_token"),
-    ),
-  ).toBeNull();
+  await page.reload();
+  await page.getByLabel(/Open a saved patient/).selectOption("12");
+  await expect(page.getByRole("form", { name: "Symptoms", exact: true })).toBeVisible();
 });
 
 test("analysis pending, failure, and retry preserve honest result states", async ({
   page,
 }) => {
   await api(page);
-  await session(page);
   await page.goto("/");
   await createPatient(page);
   await addSymptom(page);
@@ -500,7 +401,6 @@ test("report drag and drop retains a failed selection for retry", async ({
   page,
 }) => {
   await api(page);
-  await session(page);
   await page.goto("/");
   await createPatient(page);
   await page.getByRole("button", { name: /03 Medical reports/ }).click();
@@ -550,7 +450,6 @@ test("API validation messages focus the error and allow patient retry", async ({
   page,
 }) => {
   await api(page);
-  await session(page);
   await page.route("**/api/v1/patients", (route) =>
     route.fulfill({
       status: 422,
@@ -585,7 +484,6 @@ test("system health distinguishes successful, unknown and failed responses", asy
   page,
 }) => {
   await api(page);
-  await session(page);
   await page.goto("/status");
   await expect(
     page.getByText("Not checked", { exact: true }).first(),
@@ -626,7 +524,7 @@ for (const width of [320, 375, 768, 1024, 1440, 1920]) {
     await page.setViewportSize({ width, height: 1000 });
     await page.emulateMedia({ reducedMotion: "reduce" });
     await api(page);
-    for (const route of ["/login", "/register"]) {
+    for (const route of ["/settings/llm"]) {
       await page.goto(route);
       await expect(page.getByRole("form")).toBeVisible();
       expect(
@@ -635,7 +533,6 @@ for (const width of [320, 375, 768, 1024, 1440, 1920]) {
         ),
       ).toBeTruthy();
     }
-    await session(page);
     await page.goto("/");
     for (let i = 1; i <= 4; i++) {
       await page.getByRole("button", { name: new RegExp(`0${i} `) }).click();

@@ -12,6 +12,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     String,
     Text,
     func,
@@ -22,7 +23,7 @@ from app.db.base import Base
 
 
 class User(Base):
-    """Represents an authenticated application user."""
+    """Historical account data retained for migration and archival."""
 
     __tablename__ = "users"
 
@@ -46,6 +47,28 @@ class User(Base):
     )
 
 
+class GuestWorkspace(Base):
+    __tablename__ = "guest_workspaces"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    credential_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    llm_rate_bucket: Mapped[int] = mapped_column(default=0, server_default="0")
+    llm_rate_count: Mapped[int] = mapped_column(default=0, server_default="0")
+
+
+class WorkspaceLLMConfiguration(Base):
+    __tablename__ = "workspace_llm_configurations"
+
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("guest_workspaces.id", ondelete="CASCADE"), primary_key=True)
+    provider: Mapped[str] = mapped_column(String(16))
+    model: Mapped[str] = mapped_column(String(120))
+    encrypted_api_key: Mapped[str] = mapped_column(Text)
+    session_hash: Mapped[str | None] = mapped_column(String(64))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+
 class Patient(Base):
     """Represents one patient record."""
 
@@ -57,6 +80,7 @@ class Patient(Base):
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    workspace_id: Mapped[str | None] = mapped_column(ForeignKey("guest_workspaces.id", name="fk_patients_workspace"), index=True)
     first_name: Mapped[str] = mapped_column(String(100), nullable=False)
     last_name: Mapped[str] = mapped_column(String(100), nullable=False)
     age: Mapped[int] = mapped_column(nullable=False)
@@ -79,13 +103,13 @@ class Patient(Base):
     )
 
     medical_histories: Mapped[list[MedicalHistory]] = relationship(
-        back_populates="patient"
+        back_populates="patient", cascade="all, delete-orphan",
     )
-    medications: Mapped[list[Medication]] = relationship(back_populates="patient")
-    allergies: Mapped[list[Allergy]] = relationship(back_populates="patient")
-    symptoms: Mapped[list[Symptom]] = relationship(back_populates="patient")
-    medical_reports: Mapped[list[MedicalReport]] = relationship(back_populates="patient")
-    ai_analyses: Mapped[list[AIAnalysis]] = relationship(back_populates="patient")
+    medications: Mapped[list[Medication]] = relationship(back_populates="patient", cascade="all, delete-orphan")
+    allergies: Mapped[list[Allergy]] = relationship(back_populates="patient", cascade="all, delete-orphan")
+    symptoms: Mapped[list[Symptom]] = relationship(back_populates="patient", cascade="all, delete-orphan")
+    medical_reports: Mapped[list[MedicalReport]] = relationship(back_populates="patient", cascade="all, delete-orphan")
+    ai_analyses: Mapped[list[AIAnalysis]] = relationship(back_populates="patient", cascade="all, delete-orphan")
 
 
 class MedicalHistory(Base):
@@ -168,6 +192,7 @@ class MedicalReport(Base):
 
     __tablename__ = "medical_reports"
     __table_args__ = (
+        Index("ix_medical_reports_stored_filename", "stored_filename", unique=True),
         CheckConstraint(
             "file_type IN ('PDF', 'DOCX', 'TXT', 'PNG', 'JPG', 'JPEG')",
             name="ck_medical_reports_file_type",
@@ -196,6 +221,18 @@ class MedicalReport(Base):
     ai_analysis: Mapped[AIAnalysis | None] = relationship(
         back_populates="report",
         uselist=False,
+    )
+
+
+class ReportStorageDeletion(Base):
+    """Track an object that must be removed after its report is deleted."""
+
+    __tablename__ = "report_storage_deletions"
+
+    stored_filename: Mapped[str] = mapped_column(String(255), primary_key=True)
+    report_id: Mapped[int] = mapped_column(index=True)
+    workspace_id: Mapped[str | None] = mapped_column(
+        ForeignKey("guest_workspaces.id", name="fk_report_storage_deletions_workspace"), index=True,
     )
 
 
