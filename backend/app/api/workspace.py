@@ -63,7 +63,7 @@ def get_workspace(
 ) -> str:
     workspace = find_workspace(request, db)
     if workspace is None:
-        raise HTTPException(401, "Workspace unavailable or expired. Reload to start a workspace.")
+        raise HTTPException(401, "Workspace unavailable or expired. Retry workspace setup or reload the page.")
     db.info["workspace_id"] = workspace.id
     db.info["llm_session_hash"] = capability_hash(request.cookies.get(cookie_name("llm-session")))
     return workspace.id

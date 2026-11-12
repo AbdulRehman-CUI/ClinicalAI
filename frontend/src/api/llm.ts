@@ -13,23 +13,45 @@ export type LLMStatus = {
 };
 export type LLMSelection = { provider: Provider; model: string; api_key?: string };
 export const providerNames = { openai: "OpenAI", gemini: "Google Gemini" } as const;
+export type ProviderCatalog = Record<Provider, string[]>;
+
+function readStatus(response: ApiResponse<LLMStatus>) {
+  const status = response?.data;
+  if (response?.success !== true || typeof status?.configured !== "boolean"
+    || typeof status.has_api_key !== "boolean"
+    || (status.provider !== null && status.provider !== "openai" && status.provider !== "gemini")) {
+    throw new Error("The LLM configuration endpoint returned an unexpected response.");
+  }
+  return status;
+}
 
 export async function getLLMStatus() {
-  return (await apiClient.get<ApiResponse<LLMStatus>>("/llm/config")).data.data;
+  return readStatus((await apiClient.get<ApiResponse<LLMStatus>>("/llm/config")).data);
 }
 
 export async function getLLMProviders() {
-  return (await apiClient.get<ApiResponse<Record<Provider, string[]>>>("/llm/providers")).data.data;
+  const { data: response } = await apiClient.get<ApiResponse<ProviderCatalog>>("/llm/providers");
+  const catalog = response?.data;
+  if (response?.success !== true || !catalog || ![catalog.openai, catalog.gemini].every(
+    (models) => Array.isArray(models) && models.every((model) => typeof model === "string" && model.length > 0),
+  )) {
+    throw new Error("The model catalog endpoint returned an unexpected response.");
+  }
+  return catalog;
 }
 
 export async function testLLM(selection: LLMSelection) {
-  await apiClient.post("/llm/test", selection);
+  const { data } = await apiClient.post<ApiResponse<{ tested: boolean }>>("/llm/test", selection);
+  if (data?.success !== true || data.data?.tested !== true) {
+    throw new Error("The connection test endpoint returned an unexpected response.");
+  }
 }
 
 export async function saveLLM(selection: LLMSelection & { remember: boolean }) {
-  return (await apiClient.put<ApiResponse<LLMStatus>>("/llm/config", selection)).data.data;
+  return readStatus((await apiClient.put<ApiResponse<LLMStatus>>("/llm/config", selection)).data);
 }
 
 export async function removeLLM() {
-  await apiClient.delete("/llm/config");
+  const response = await apiClient.delete("/llm/config");
+  if (response.status !== 204) throw new Error("The configuration removal endpoint returned an unexpected response.");
 }

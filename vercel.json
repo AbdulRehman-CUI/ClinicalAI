@@ -1,44 +1,32 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "fluid": true,
   "services": {
-    "frontend": {
-      "root": "frontend/"
-    },
     "backend": {
-      "root": "backend/",
-      "entrypoint": "app.main:app"
+      "root": "backend",
+      "framework": "fastapi",
+      "entrypoint": "app.main:app",
+      "functions": {
+        "app/main.py": { "maxDuration": 300, "excludeFiles": "data/**" }
+      }
+    },
+    "frontend": {
+      "root": "frontend",
+      "framework": "vite",
+      "buildCommand": "npm run build",
+      "outputDirectory": "dist",
+      "rewrites": [
+        { "source": "/((?!assets(?:/|$)).*)", "destination": "/index.html" }
+      ]
     }
   },
   "rewrites": [
-    {
-      "source": "/api/(.*)",
-      "destination": {
-        "service": "backend"
-      }
-    },
-    {
-      "source": "/docs",
-      "destination": {
-        "service": "backend"
-      }
-    },
-    {
-      "source": "/redoc",
-      "destination": {
-        "service": "backend"
-      }
-    },
-    {
-      "source": "/openapi.json",
-      "destination": {
-        "service": "backend"
-      }
-    },
-    {
-      "source": "/(.*)",
-      "destination": {
-        "service": "frontend"
-      }
-    }
+    { "source": "/api", "destination": { "service": "backend" } },
+    { "source": "/api/(.*)", "destination": { "service": "backend" } },
+    { "source": "/docs", "destination": { "service": "backend" } },
+    { "source": "/docs/(.*)", "destination": { "service": "backend" } },
+    { "source": "/redoc", "destination": { "service": "backend" } },
+    { "source": "/openapi.json", "destination": { "service": "backend" } },
+    { "source": "/(.*)", "destination": { "service": "frontend" } }
   ]
 }

@@ -1,10 +1,10 @@
 # Deploy ClinicalAI to Vercel
 
-Use two Vercel projects connected to `AbdulRehman-CUI/ClinicalAI`. Both projects use the same Git repository and separate Root Directory settings. The frontend calls the backend over HTTPS. The backend uses Neon PostgreSQL and a private Amazon S3 bucket. Keep previews on a separate database or Neon branch, bucket, and credentials.
+Use one Vercel project connected to `AbdulRehman-CUI/ClinicalAI` with the **Services** framework preset (Beta) and the repository root as its Root Directory. The root `vercel.json` builds Vite and FastAPI as separate services on one HTTPS origin. The backend uses Neon PostgreSQL and a private Amazon S3 bucket. Keep previews on a separate database or Neon branch, bucket, and credentials. [Vercel Services](https://vercel.com/docs/services)
 
 ## Prepare the private workspace
 
-ClinicalAI opens without accounts. Each browser receives an isolated workspace. Use same-site HTTPS custom domains, such as `app.example.com` for the frontend and `api.example.com` for the backend. The API issues a host-only Secure, HttpOnly, SameSite=Lax cookie, and the frontend includes credentials in its HTTPS requests. Independently assigned `*.vercel.app` hosts do not provide this same-site arrangement. If custom subdomains are unavailable, route `/api/*` through an HTTPS reverse proxy on the frontend origin and pass through cookies and `Set-Cookie`. [Cookie attributes](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Set-Cookie)
+ClinicalAI opens without accounts. Each browser receives an isolated workspace. The browser loads the frontend and sends credentialed API requests on the same origin. FastAPI issues a host-only Secure, HttpOnly, SameSite=Lax cookie. If you use the standalone project configurations, use same-site HTTPS custom domains or an HTTPS reverse proxy that passes through cookies and `Set-Cookie`. [Cookie attributes](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Set-Cookie)
 
 Apply edge rate limits to workspace creation and report signing. The app enforces a separate database-backed limit for outbound provider calls per workspace. Apply any network access controls required by your organization's clinical-data policy. [Vercel WAF access controls](https://vercel.com/kb/guide/supporting-compliance-with-vercel-waf)
 
@@ -58,11 +58,11 @@ python -m app.services.medical_report
 
 An interrupted upload with an uncertain database commit may leave an unreferenced finalized object. Reconcile finalized keys against report filenames and their patients' workspace IDs, and against queued deletions with their workspace IDs. Preserve legacy keys without a workspace prefix according to the archive policy. Treat inventory and backups as sensitive.
 
-## Create the backend project
+## Configure the Services project
 
-Import the repository in Vercel. Set Root Directory to `backend` and the framework preset to **FastAPI**. Enable automatic exposure of Vercel system environment variables. Leave the install and build commands at the framework defaults. Vercel reads `requirements.txt`, selects Python 3.12 from `.python-version`, and loads the existing `app/main.py` ASGI entrypoint. `backend/vercel.json` enables Fluid compute and sets a 300-second function duration. The root directory does not need source files from outside `backend`. [Vercel FastAPI configuration](https://vercel.com/docs/frameworks/backend/fastapi)
+In Vercel, use the repository root and the **Services** framework preset. Enable automatic exposure of Vercel system environment variables. The backend service uses `backend/requirements.txt`, Python 3.12, the existing `app.main:app` entrypoint, and a 300-second function duration. Public routing sends `/api/*`, `/docs`, `/redoc`, and `/openapi.json` to FastAPI. The frontend serves `dist` and handles direct navigation to `/settings/llm` and `/status`. [Vercel Services routing](https://vercel.com/docs/services/routing)
 
-Set these values in the backend project's intended environment. Generate `WORKSPACE_SIGNING_SECRET` with `python -c "import secrets; print(secrets.token_urlsafe(48))"`. Generate `LLM_ENCRYPTION_KEY` with `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`. Put both values directly in the secret manager.
+Set these values in the intended Vercel environment. Generate `WORKSPACE_SIGNING_SECRET` with `python -c "import secrets; print(secrets.token_urlsafe(48))"`. Generate `LLM_ENCRYPTION_KEY` with `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`. Put both values directly in the secret manager.
 
 | Variable | Value |
 | --- | --- |
@@ -85,29 +85,25 @@ Set these values in the backend project's intended environment. Generate `WORKSP
 
 Set `FRONTEND_URL` to the frontend's actual HTTPS origin. Additional origins require exact entries in `ALLOWED_CORS_ORIGINS`, including any approved same-site preview. Cookie-based writes require an approved Origin and `X-ClinicalAI-Request: 1`. Remove obsolete shared LLM credentials and JWT settings from deployment environments.
 
-## Create the frontend project
-
-Import the same Git repository as a second project. Select Root Directory `frontend` and the **Vite** preset. Leave dependency installation at the default using the committed npm lockfile. `frontend/vercel.json` runs `npm run build`, serves `dist`, and rewrites application paths to the SPA entrypoint while excluding `/api` and `/assets`.
+### Frontend build variables
 
 ```dotenv
-VITE_API_BASE_URL=https://YOUR-BACKEND-DOMAIN/api/v1
+VITE_API_BASE_URL=/api/v1
 VITE_DIRECT_REPORT_UPLOADS=true
 ```
 
-Set these in the frontend Vercel environment before building. Vite includes them in the JavaScript bundle, so keep credentials in the backend environment. For native development and Docker, keep `VITE_API_BASE_URL=/api/v1` and leave direct uploads off. If you later use one origin for both apps, route `/api/*` to the backend at the gateway.
+Vite includes these values in the browser bundle. Set `VITE_API_BASE_URL=/api/v1` or leave it unset to use the same-origin default. Use `VITE_DIRECT_REPORT_UPLOADS=true` for hosted storage. Leave direct uploads off for native development and Docker with local storage.
 
 ## Deploy or redeploy after approval
 
-Use the dashboard to import and deploy the backend, then deploy the frontend with its backend URL. For a manual CLI deployment of the connected projects, work from a clean checkout at the repository root, link the monorepo, and select the backend. Repeat the link command and select the frontend. The Vercel ignore files exclude local environment files and report data from CLI uploads.
+Use the dashboard to import or update the project, then deploy both services together. For manual CLI deployment, work from a clean checkout at the repository root and link to the intended Services project. The Vercel ignore files exclude local environment files and report data from CLI uploads.
 
 ```bash
-npx vercel@latest link --repo
-npx vercel@latest deploy --prod
-npx vercel@latest link --repo
+npx vercel@latest link
 npx vercel@latest deploy --prod
 ```
 
-After the projects are connected, pushes to the configured production branch trigger production builds. Use **Deployments → Redeploy** after changing runtime or build-time environment variables. Recheck CORS and the frontend bundle if either domain changes. [Vercel monorepo deployment](https://vercel.com/docs/monorepos)
+Use **Deployments → Redeploy** after changing runtime or build-time environment variables. Check `GET /api/v1/health` and `GET /api/v1/llm/providers` before testing the workspace flow. Both return JSON without creating a workspace or using a provider key. If they return `FUNCTION_INVOCATION_FAILED`, check the FastAPI runtime logs for the first import or startup error. Compare the required variable names above against the selected deployment environment. `FRONTEND_URL` must match the browser origin for workspace writes. Then verify that `POST /api/v1/workspace` returns 204 and the following configuration request includes the cookie.
 
 ## Verify with synthetic records
 

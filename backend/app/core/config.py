@@ -197,11 +197,11 @@ class Settings(BaseSettings):
     def validate_deployment(self) -> Settings:
         if os.environ.get("VERCEL") == "1" and not self.is_production:
             raise ValueError("Set ENVIRONMENT=production on the Vercel backend.")
-        if self.storage_provider == "s3" and not all(
-            value and value.strip() for value in
-            (self.storage_bucket, self.storage_region, self.storage_access_key_id, self.storage_secret_access_key)
-        ):
-            raise ValueError("S3 storage requires STORAGE_BUCKET, STORAGE_REGION and both storage credentials.")
+        if self.storage_provider == "s3":
+            required = ("storage_bucket", "storage_region", "storage_access_key_id", "storage_secret_access_key")
+            missing = [field.upper() for field in required if not (getattr(self, field) or "").strip()]
+            if missing:
+                raise ValueError(f"S3 storage requires {', '.join(missing)}.")
         if self.llm_encryption_key:
             try:
                 Fernet(self.llm_encryption_key.encode())
@@ -216,12 +216,14 @@ class Settings(BaseSettings):
             raise ValueError("WORKSPACE_SIGNING_SECRET requires a generated secret of at least 32 bytes.")
         if not self.llm_encryption_key:
             raise ValueError("Production requires LLM_ENCRYPTION_KEY.")
-        for value in filter(None, (self.database_url, self.direct_database_url)):
+        for name, value in (("DATABASE_URL", self.database_url), ("DIRECT_DATABASE_URL", self.direct_database_url)):
+            if value is None:
+                continue
             url = make_url(value)
             if url.drivername != "postgresql+psycopg" or url.query.get("sslmode") not in {
                 "require", "verify-ca", "verify-full"
             }:
-                raise ValueError("Production requires a TLS-enabled PostgreSQL database URL.")
+                raise ValueError(f"{name} must be a TLS-enabled PostgreSQL URL in production.")
         if self.storage_provider != "s3":
             raise ValueError("Production requires STORAGE_PROVIDER=s3.")
         if self.storage_endpoint:

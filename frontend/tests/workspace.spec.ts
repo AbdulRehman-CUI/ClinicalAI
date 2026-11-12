@@ -132,7 +132,11 @@ test("guest can test, save, replace and remove their LLM settings", async ({ pag
   await page.goto("/");
   await page.getByRole("link", { name: "Configure LLM" }).click();
   await expect(page).toHaveURL(/\/settings\/llm$/);
+  await expect(page.getByLabel(/^Model/).locator("option")).toHaveText(["Choose a model", "gpt-4.1-mini", "gpt-4o-mini"]);
+  await page.getByLabel(/^Model/).selectOption("gpt-4o-mini");
   await page.getByLabel(/^Provider/).selectOption("gemini");
+  await expect(page.getByLabel(/^Model/)).toHaveValue("");
+  await expect(page.getByLabel(/^Model/).locator("option")).toHaveText(["Choose a model", "gemini-3.6-flash"]);
   await page.getByLabel(/^Model/).selectOption("gemini-3.6-flash");
   const key = page.getByLabel(/^API key/);
   await key.fill("synthetic-gemini-key");
@@ -147,6 +151,8 @@ test("guest can test, save, replace and remove their LLM settings", async ({ pag
   await page.reload();
   await expect(page.getByText("LLM Configured", { exact: true })).toBeVisible();
   await expect(key).toHaveValue("");
+  await expect(page.getByRole("button", { name: "Test connection" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Save configuration" })).toBeEnabled();
   await key.fill("synthetic-replacement-key");
   await page.getByLabel(/Remember this encrypted key/).check();
   await page.getByRole("button", { name: "Save configuration" }).click();
@@ -160,6 +166,55 @@ test("guest can test, save, replace and remove their LLM settings", async ({ pag
   await page.getByRole("link", { name: "Manage LLM" }).click();
   await page.getByRole("button", { name: "Remove configuration" }).click();
   await expect(page.getByRole("status")).toContainText("configuration removed");
+});
+
+test("catalog remains usable while workspace startup fails and retry preserves the draft", async ({ page }) => {
+  const requests = await api(page, false);
+  await page.route("**/api/v1/workspace", (route) => route.fulfill({
+    status: 200, contentType: "text/html", body: "<html>Unexpected SPA fallback</html>",
+  }), { times: 1 });
+  await page.route("**/api/v1/llm/test", (route) => route.fulfill({
+    status: 422, json: { success: false, error: "llm_invalid_key", message: "The provider rejected this API key." },
+  }), { times: 1 });
+  await page.goto("/settings/llm");
+  await expect(page.getByRole("alert")).toContainText("Unable to open your guest workspace");
+  await page.getByLabel(/^Provider/).selectOption("gemini");
+  await page.getByLabel(/^Model/).selectOption("gemini-3.6-flash");
+  const key = page.getByLabel(/^API key/);
+  await key.fill("synthetic-key");
+  const connection = page.getByRole("button", { name: "Test connection" });
+  const save = page.getByRole("button", { name: "Save configuration" });
+  await expect(connection).toBeDisabled();
+  await expect(save).toBeDisabled();
+  await page.getByRole("button", { name: "Retry workspace" }).click();
+  await expect(connection).toBeEnabled();
+  await expect(save).toBeEnabled();
+  await expect(key).toHaveValue("synthetic-key");
+  await connection.click();
+  await expect(page.getByRole("alert")).toContainText("The provider rejected this API key.");
+  await key.fill("synthetic-replacement");
+  await connection.click();
+  await expect(page.getByRole("status")).toContainText("Connection tested");
+  await save.click();
+  await expect(page.getByRole("status")).toContainText("configuration saved");
+  expect(requests.find((r) => r.method === "PUT")?.body).toMatchObject({ provider: "gemini", model: "gemini-3.6-flash" });
+});
+
+test("a failed catalog can be retried independently of the saved configuration", async ({ page }) => {
+  await api(page);
+  let catalogUnavailable = true;
+  await page.route("**/api/v1/llm/providers", (route) => catalogUnavailable
+    ? route.fulfill({ status: 200, contentType: "text/html", body: "<html>Unexpected SPA fallback</html>" })
+    : route.fallback());
+  await page.goto("/settings/llm");
+  await expect(page.getByRole("alert")).toContainText("Unable to load available models");
+  await expect(page.getByLabel(/^Provider/)).toBeEnabled();
+  await expect(page.getByLabel(/^Model/)).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Remove configuration" })).toBeEnabled();
+  catalogUnavailable = false;
+  await page.getByRole("button", { name: "Retry models" }).click();
+  await expect(page.getByLabel(/^Model/)).toHaveValue("gpt-4.1-mini");
+  await expect(page.getByRole("alert")).toHaveCount(0);
 });
 
 test("patient validation, every clinical form, profile editing, analysis objects and reset", async ({

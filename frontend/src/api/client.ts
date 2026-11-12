@@ -11,13 +11,20 @@ export const apiClient = axios.create({
 
 let workspaceReady: Promise<unknown> | undefined;
 
+function isPublicRequest(url?: string) {
+  return url === "/workspace" || url === "/health" || url === "/llm/providers";
+}
+
 apiClient.interceptors.request.use(async (request) => {
   if (!["get", "head", "options"].includes(request.method ?? "get")) {
     request.headers.set("X-ClinicalAI-Request", "1");
   }
-  if (["/workspace", "/health", "/llm/providers"].includes(request.url ?? "")) return request;
+  if (isPublicRequest(request.url)) return request;
   if (!workspaceReady) {
-    const initialize = () => apiClient.post("/workspace");
+    const initialize = async () => {
+      const response = await apiClient.post("/workspace");
+      if (response.status !== 204) throw new Error("The workspace endpoint returned an unexpected response.");
+    };
     workspaceReady = (navigator.locks
       ? navigator.locks.request("clinicalai-workspace", initialize)
       : initialize()).catch((error: unknown) => {
@@ -27,6 +34,13 @@ apiClient.interceptors.request.use(async (request) => {
   }
   await workspaceReady;
   return request;
+});
+
+apiClient.interceptors.response.use(undefined, (error: unknown) => {
+  if (axios.isAxiosError(error) && error.response?.status === 401 && !isPublicRequest(error.config?.url)) {
+    workspaceReady = undefined;
+  }
+  return Promise.reject(error);
 });
 
 export function getApiErrorMessage(

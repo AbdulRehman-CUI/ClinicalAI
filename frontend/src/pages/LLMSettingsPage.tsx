@@ -1,14 +1,21 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
+import { isAxiosError } from "axios";
 import { KeyRound } from "lucide-react";
 import { getApiErrorMessage } from "../api/client";
 import {
   getLLMProviders, getLLMStatus, providerNames, removeLLM, saveLLM, testLLM,
-  type LLMStatus, type Provider,
+  type LLMStatus, type Provider, type ProviderCatalog,
 } from "../api/llm";
 import { Badge, Button, CardHeading, Field } from "../components/WorkspaceUI";
 
 export function LLMSettingsPage() {
-  const [providers, setProviders] = useState<Record<Provider, string[]> | null>(null);
+  const [providers, setProviders] = useState<ProviderCatalog | null>(null);
+  const [catalogError, setCatalogError] = useState("");
+  const [catalogAttempt, setCatalogAttempt] = useState(0);
+  const [workspaceReady, setWorkspaceReady] = useState(false);
+  const [workspaceError, setWorkspaceError] = useState("");
+  const [workspaceAttempt, setWorkspaceAttempt] = useState(0);
+  const draftEdited = useRef(false);
   const [config, setConfig] = useState<LLMStatus | null>(null);
   const [provider, setProvider] = useState<Provider>("openai");
   const [model, setModel] = useState("");
@@ -21,25 +28,41 @@ export function LLMSettingsPage() {
 
   useEffect(() => {
     let active = true;
-    Promise.all([getLLMProviders(), getLLMStatus()]).then(([options, saved]) => {
-      if (!active) return;
-      const selectedProvider = saved?.provider ?? "openai";
-      const available = options?.[selectedProvider] ?? [];
-      setProviders(options);
-      setConfig(saved);
-      setProvider(selectedProvider);
-      setModel(saved?.model && available.includes(saved.model) ? saved.model : (available[0] ?? ""));
-      setRemember(saved?.remember ?? false);
+    getLLMProviders().then((options) => {
+      if (active) setProviders(options);
     }).catch((failure: unknown) => {
-      if (active) setError(getApiErrorMessage(failure, "Unable to load LLM settings."));
+      if (active) setCatalogError(getApiErrorMessage(failure));
     });
     return () => { active = false; };
-  }, []);
+  }, [catalogAttempt]);
 
+  useEffect(() => {
+    let active = true;
+    getLLMStatus().then((saved) => {
+      if (!active) return;
+      setConfig(saved);
+      if (!draftEdited.current) {
+        setProvider(saved.provider ?? "openai");
+        setModel(saved.model ?? "");
+        setRemember(saved.remember ?? false);
+      }
+      setWorkspaceReady(true);
+    }).catch((failure: unknown) => {
+      if (active) setWorkspaceError(getApiErrorMessage(failure));
+    });
+    return () => { active = false; };
+  }, [workspaceAttempt]);
+
+  const models = providers?.[provider] ?? [];
+  const validModel = models.includes(model);
   const hasSavedKey = config?.provider === provider && config.has_api_key;
-  const canSubmit = Boolean(model && (apiKey.trim() || hasSavedKey));
+  const hasEnteredKey = Boolean(apiKey.trim());
+  const canTest = workspaceReady && validModel && hasEnteredKey && !busy;
+  const canSave = workspaceReady && validModel && (hasEnteredKey || hasSavedKey) && !busy;
+  const canRemove = workspaceReady && Boolean(config?.has_api_key) && !busy;
 
   async function submit(action: "test" | "save" | "remove") {
+    if (!(action === "test" ? canTest : action === "save" ? canSave : canRemove)) return;
     setBusy(true);
     setMessage("");
     setError("");
@@ -62,7 +85,13 @@ export function LLMSettingsPage() {
         setMessage("Saved LLM configuration removed.");
       }
     } catch (failure) {
-      setError(getApiErrorMessage(failure, "Unable to update LLM settings."));
+      const message = getApiErrorMessage(failure, "Unable to update LLM settings.");
+      if (isAxiosError(failure) && failure.response?.status === 401) {
+        setWorkspaceReady(false);
+        setWorkspaceError(message);
+      } else {
+        setError(message);
+      }
     } finally {
       setBusy(false);
     }
@@ -70,7 +99,7 @@ export function LLMSettingsPage() {
 
   function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (canSubmit && !busy) void submit("save");
+    void submit("save");
   }
 
   return (
@@ -80,15 +109,18 @@ export function LLMSettingsPage() {
         title="LLM configuration"
         description="Choose the provider and model for your workspace."
         trailing={<Badge tone={config?.configured ? "success" : "warning"}>
-          {config?.configured ? "LLM Configured" : "LLM Not Configured"}
+          {workspaceReady
+            ? config?.configured ? "LLM Configured" : "LLM Not Configured"
+            : workspaceError ? "Workspace unavailable" : "Loading workspace"}
         </Badge>}
       />
       <form onSubmit={save} aria-label="LLM configuration">
         <Field label="Provider">
-          <select value={provider} disabled={busy || !providers} onChange={(event) => {
+          <select value={provider} disabled={busy} onChange={(event) => {
+            draftEdited.current = true;
             const next = event.target.value as Provider;
             setProvider(next);
-            setModel(providers?.[next]?.[0] ?? "");
+            setModel("");
             setApiKey("");
             setShowKey(false);
             setMessage("");
@@ -98,20 +130,39 @@ export function LLMSettingsPage() {
           </select>
         </Field>
         <Field label="Model" hint="ClinicalAI supports the listed models. Test the selected model to check access for your key.">
-          <select value={model} disabled={busy || !providers} onChange={(event) => {
+          <select value={validModel ? model : ""} disabled={busy || models.length === 0} onChange={(event) => {
+            draftEdited.current = true;
             setModel(event.target.value);
             setMessage("");
           }}>
-            {!model && <option value="">Choose a model</option>}
-            {providers?.[provider]?.map((id) => <option key={id} value={id}>{id}</option>)}
+            <option value="">{catalogError ? "Models unavailable" : !providers ? "Loading models…" : models.length ? "Choose a model" : "No models available"}</option>
+            {models.map((id) => <option key={id} value={id}>{id}</option>)}
           </select>
         </Field>
+        {catalogError && (
+          <div className="llm-actions">
+            <p className="access-note" role="alert">Unable to load available models. {catalogError}</p>
+            <Button type="button" variant="secondary" onClick={() => {
+              setCatalogError("");
+              setCatalogAttempt((attempt) => attempt + 1);
+            }}>Retry models</Button>
+          </div>
+        )}
+        {workspaceError && (
+          <div className="llm-actions">
+            <p className="access-note" role="alert">Unable to open your guest workspace. {workspaceError}</p>
+            <Button type="button" variant="secondary" onClick={() => {
+              setWorkspaceError("");
+              setWorkspaceAttempt((attempt) => attempt + 1);
+            }}>Retry workspace</Button>
+          </div>
+        )}
         <div className="llm-key-row">
           <Field label="API key" optional={Boolean(hasSavedKey)} hint={hasSavedKey ? "A key is saved. Leave blank to reuse it." : undefined}>
             <input
               type={showKey ? "text" : "password"} value={apiKey}
               autoComplete="off" spellCheck={false} maxLength={4096} disabled={busy}
-              onChange={(event) => { setApiKey(event.target.value); setMessage(""); }}
+              onChange={(event) => { draftEdited.current = true; setApiKey(event.target.value); setMessage(""); }}
             />
           </Field>
           <Button type="button" variant="secondary" disabled={busy} onClick={() => setShowKey(!showKey)}>
@@ -119,7 +170,10 @@ export function LLMSettingsPage() {
           </Button>
         </div>
         <label className="llm-remember">
-          <input type="checkbox" checked={remember} disabled={busy} onChange={(event) => setRemember(event.target.checked)} />
+          <input type="checkbox" checked={remember} disabled={busy} onChange={(event) => {
+            draftEdited.current = true;
+            setRemember(event.target.checked);
+          }} />
           Remember this encrypted key for up to 7 days
         </label>
         <p className="field-hint">Session keys expire after 8 hours or when the browser session ends.</p>
@@ -133,11 +187,11 @@ export function LLMSettingsPage() {
         {error && <p className="access-note" role="alert">{error}</p>}
         {message && <p role="status">{message}</p>}
         <div className="llm-actions">
-          <Button type="button" variant="secondary" disabled={!canSubmit || busy} onClick={() => void submit("test")}>
+          <Button type="button" variant="secondary" disabled={!canTest} onClick={() => void submit("test")}>
             Test connection
           </Button>
-          <Button type="submit" busy={busy} disabled={!canSubmit}>Save configuration</Button>
-          <Button type="button" variant="danger" disabled={!config?.has_api_key || busy} onClick={() => void submit("remove")}>
+          <Button type="submit" busy={busy} disabled={!canSave}>Save configuration</Button>
+          <Button type="button" variant="danger" disabled={!canRemove} onClick={() => void submit("remove")}>
             Remove configuration
           </Button>
         </div>
