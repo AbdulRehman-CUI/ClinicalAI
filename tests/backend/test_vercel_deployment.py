@@ -63,13 +63,16 @@ def test_rejects_insecure_production_settings(monkeypatch, override):
         Settings(_env_file=None)
 
 
-def test_hosted_app_import_startup_and_cors(tmp_path):
+@pytest.mark.parametrize("missing_storage", [False, True])
+def test_hosted_app_import_startup_and_cors(tmp_path, missing_storage):
     env = os.environ | PRODUCTION | {
         "VERCEL": "1",
         "ALLOWED_CORS_ORIGINS": "https://preview.example.test, https://web.example.test",
         "DIRECT_DATABASE_URL": "",
         "UPLOAD_DIRECTORY": str(tmp_path / "no-uploads"),
     }
+    if missing_storage:
+        env.update(STORAGE_BUCKET="", STORAGE_ACCESS_KEY_ID="", STORAGE_SECRET_ACCESS_KEY="")
     code = """
 from fastapi.testclient import TestClient
 from app.main import app
@@ -86,8 +89,8 @@ with TestClient(app) as client:
     assert client.get('/api/v1/health').json()['data']['status'] == 'ok'
     catalog = client.get('/api/v1/llm/providers')
     assert catalog.status_code == 200
-    assert set(catalog.json()['data']) == {'openai', 'gemini'}
-    assert all(catalog.json()['data'].values())
+    assert set(catalog.json()['data']) == {'openai', 'gemini', 'anthropic', 'openrouter', 'groq', 'custom'}
+    assert catalog.json()['data']['custom'] == []
     for path in ('/docs', '/redoc', '/openapi.json'):
         assert client.get(path).status_code == 200
     for path in ('/patients', '/patients/1/reports', '/patients/1/symptoms', '/patients/1/analysis'):
@@ -117,7 +120,7 @@ def test_hosted_startup_reports_missing_settings_without_values():
         cwd=ROOT / "backend", env=env, capture_output=True, text=True,
     )
     assert result.returncode != 0
-    for name in ("DEBUG", "WORKSPACE_SIGNING_SECRET", "LLM_ENCRYPTION_KEY", "STORAGE_BUCKET", "STORAGE_SECRET_ACCESS_KEY"):
+    for name in ("DEBUG", "WORKSPACE_SIGNING_SECRET", "LLM_ENCRYPTION_KEY"):
         assert name in result.stderr
     assert synthetic_bad_value not in result.stderr
 
@@ -219,7 +222,7 @@ def test_s3_post_policy_enforces_exact_size_type_and_key(monkeypatch):
     from app.services import report_storage
 
     monkeypatch.setattr(report_storage, "get_settings", lambda: SimpleNamespace(
-        storage_bucket="synthetic-tests", storage_endpoint=None, storage_region="us-east-1",
+        storage_issues=lambda: [], storage_bucket="synthetic-tests", storage_endpoint=None, storage_region="us-east-1",
         storage_access_key_id="test-id", storage_secret_access_key="test-key",
     ))
     storage = S3ReportStorage()

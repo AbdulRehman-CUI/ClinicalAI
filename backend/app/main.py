@@ -50,8 +50,6 @@ def initialize_local_database() -> None:
     Path(engine.url.database).parent.mkdir(parents=True, exist_ok=True)
     inspector = inspect(engine)
     tables = set(inspector.get_table_names())
-    if "patients" in tables and any(column["name"] == "workspace_id" for column in inspector.get_columns("patients")):
-        return
     config = Config(str(Path(BACKEND_DIR) / "alembic.ini"))
     config.attributes["database_url"] = engine.url.render_as_string(hide_password=False)
     config.attributes["configure_logger"] = False
@@ -68,6 +66,8 @@ async def lifespan(app: FastAPI):
     """Initialize the local SQLite database at startup; hosted schemas use Alembic."""
     if session.sqlite:
         initialize_local_database()
+    for issue in settings.storage_issues():
+        logger.warning("Storage readiness: %s", issue)
     logger.info("Starting %s", settings.project_name)
     yield
     logger.info("Shutting down %s", settings.project_name)

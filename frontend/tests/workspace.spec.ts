@@ -36,7 +36,7 @@ const ok = (route: Route, data: unknown) =>
   route.fulfill({ json: { success: true, message: "", data } });
 
 async function api(page: Page, configured = true) {
-  let llm = { configured, provider: "openai", model: "gpt-4.1-mini", has_api_key: configured, tested: configured, remember: false };
+  let llm = { id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", active: true, configured, provider: "openai", model: "gpt-4.1-mini", has_api_key: configured, tested: configured, remember: false };
   let savedPatient: typeof patient | null = null;
   const requests: { path: string; method: string; body: unknown }[] = [];
   await page.route("**/api/v1/**", async (route) => {
@@ -60,13 +60,14 @@ async function api(page: Page, configured = true) {
     requests.push({ path, method: request.method(), body });
     if (path === "/workspace") return route.fulfill({ status: 204 });
     if (path === "/llm/providers") return ok(route, { openai: ["gpt-4.1-mini", "gpt-4o-mini"], gemini: ["gemini-3.6-flash"] });
+    if (path === "/llm/configs") return ok(route, llm.has_api_key ? [llm] : []);
     if (path === "/llm/config") {
       if (request.method() === "DELETE") {
         llm = { ...llm, configured: false, has_api_key: false, tested: false };
         return route.fulfill({ status: 204 });
       }
       if (request.method() === "PUT") llm = {
-        configured: true, provider: body.provider, model: body.model, has_api_key: true,
+        id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", active: true, configured: true, provider: body.provider, model: body.model, has_api_key: true,
         tested: true, remember: body.remember,
       };
       return ok(route, llm);
@@ -151,7 +152,7 @@ test("guest can test, save, replace and remove their LLM settings", async ({ pag
   await page.reload();
   await expect(page.getByText("LLM Configured", { exact: true })).toBeVisible();
   await expect(key).toHaveValue("");
-  await expect(page.getByRole("button", { name: "Test connection" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Test connection" })).toBeEnabled();
   await expect(page.getByRole("button", { name: "Save configuration" })).toBeEnabled();
   await key.fill("synthetic-replacement-key");
   await page.getByLabel(/Remember this encrypted key/).check();
@@ -159,7 +160,7 @@ test("guest can test, save, replace and remove their LLM settings", async ({ pag
   await expect(page.getByRole("status")).toContainText("configuration saved");
   const put = requests.filter((r) => r.path === "/llm/config" && r.method === "PUT");
   expect(put.at(-1)?.body).toEqual({
-    provider: "gemini", model: "gemini-3.6-flash", api_key: "synthetic-replacement-key", remember: true,
+    id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", provider: "gemini", model: "gemini-3.6-flash", api_key: "synthetic-replacement-key", remember: true,
   });
   await page.getByRole("link", { name: "Patient workspace" }).click();
   await expect(page.getByRole("link", { name: "Manage LLM" })).toBeVisible();
@@ -670,3 +671,76 @@ for (const width of [320, 375, 768, 1024, 1440, 1920]) {
     }
   });
 }
+
+test("credential discovery ignores stale provider responses and custom IDs remain usable", async ({page}) => {
+  await api(page, false);
+  let finish: (() => void) | undefined;
+  await page.route("**/api/v1/llm/models", async (route) => {
+    await new Promise<void>((resolve) => { finish = resolve; });
+    await ok(route, {source: "discovered", models: ["stale/model:v1"]});
+  });
+  await page.goto('/settings/llm');
+  await page.getByLabel(/^API key/).fill('synthetic-key');
+  await page.getByRole('button', {name:'Load models with key'}).click();
+  await expect(page.getByRole('button', {name:'Loading models…'})).toBeVisible();
+  await page.getByLabel(/^Provider/).selectOption('custom');
+  finish?.();
+  await expect(page.getByLabel(/^API key/)).toHaveValue('');
+  await page.getByLabel('Endpoint base URL').fill('https://example.com/v1');
+  await page.getByRole('textbox', {name: /^Manual model ID/}).fill('vendor/model:v1');
+  await page.getByLabel(/^API key/).fill('custom-key');
+  await expect(page.getByRole('button', {name:'Test connection'})).toBeEnabled();
+  await expect(page.getByLabel(/^Model/).locator('option[value="stale/model:v1"]')).toHaveCount(0);
+  await page.getByLabel('Endpoint base URL').fill('https://other.example/v1');
+  await expect(page.getByLabel(/^API key/)).toHaveValue('');
+});
+
+test("expired workspace retries only once", async ({page}) => {
+  await api(page, false);
+  let reads = 0;
+  await page.route('**/api/v1/llm/config', async (route) => {
+    reads++;
+    await route.fulfill({status:401,json:{success:false,message:'Workspace expired'}});
+  });
+  await page.goto('/settings/llm');
+  await expect(page.getByRole('button',{name:'Retry workspace'})).toBeVisible();
+  expect(reads).toBe(2);
+});
+
+test("multiple saved entries require explicit activation and retain independent keys", async ({page}) => {
+  await api(page, false);
+  let entries: any[] = [];
+  let activeId: string | undefined;
+  await page.route('**/api/v1/llm/**', async route => {
+    const request = route.request(); const path = new URL(request.url()).pathname;
+    const active = () => entries.find(e => e.id === activeId) ?? {configured:false,provider:null,model:null,has_api_key:false};
+    if (path.endsWith('/providers')) return ok(route, {openai:['gpt-4.1-mini'],gemini:['gemini-3.6-flash']});
+    if (path.endsWith('/configs')) return ok(route, entries.map(e => ({...e,active:e.id===activeId})));
+    if (path.endsWith('/activate')) { activeId = path.split('/').at(-2); return ok(route,active()); }
+    if (path.endsWith('/test')) return ok(route,{tested:true});
+    if (request.method()==='PUT') {
+      const input = request.postDataJSON();
+      const entry = {id:String(entries.length+1).padStart(32,'0'),provider:input.provider,model:input.model,configured:true,has_api_key:true,tested:true,remember:false};
+      entries.push(entry); if (!activeId) activeId=entry.id;
+      return ok(route, {...entry,active:entry.id===activeId});
+    }
+    if (request.method()==='DELETE') { const id = new URL(request.url()).searchParams.get('id'); entries=entries.filter(e=>e.id!==id); if(activeId===id) activeId=undefined; return route.fulfill({status:204}); }
+    return ok(route,active());
+  });
+  await page.goto('/settings/llm');
+  await page.getByLabel(/^Model/).selectOption('gpt-4.1-mini');
+  await page.getByLabel(/^API key/).fill('synthetic-openai');
+  await page.getByRole('button',{name:'Save configuration'}).click();
+  await expect(page.getByRole('status')).toContainText('saved');
+  await page.getByLabel(/^Provider/).selectOption('gemini');
+  await page.getByLabel(/^Model/).selectOption('gemini-3.6-flash');
+  await page.getByLabel(/^API key/).fill('synthetic-gemini');
+  await page.getByRole('button',{name:'Save configuration'}).click();
+  await expect(page.getByLabel(/^Saved configurations/).locator('option')).toHaveCount(3);
+  await expect(page.getByText('Active: openai · gpt-4.1-mini')).toBeVisible();
+  await page.getByRole('button',{name:'Use for analysis'}).click();
+  await expect(page.getByText('Active: gemini · gemini-3.6-flash')).toBeVisible();
+  await page.getByRole('button',{name:'Remove configuration'}).click();
+  await expect(page.getByText(/Active: None available/)).toBeVisible();
+  await expect(page.getByLabel(/^Saved configurations/).locator('option')).toHaveCount(2);
+});

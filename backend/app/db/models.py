@@ -16,6 +16,7 @@ from sqlalchemy import (
     String,
     Text,
     func,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -60,10 +61,15 @@ class GuestWorkspace(Base):
 
 class WorkspaceLLMConfiguration(Base):
     __tablename__ = "workspace_llm_configurations"
+    __table_args__ = (Index("uq_workspace_active_llm", "workspace_id", unique=True,
+                           postgresql_where=text("active"), sqlite_where=text("active = 1")),)
 
-    workspace_id: Mapped[str] = mapped_column(ForeignKey("guest_workspaces.id", ondelete="CASCADE"), primary_key=True)
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("guest_workspaces.id", ondelete="CASCADE"), index=True)
+    active: Mapped[bool] = mapped_column(default=False)
+    base_url: Mapped[str | None] = mapped_column(String(2048))
     provider: Mapped[str] = mapped_column(String(16))
-    model: Mapped[str] = mapped_column(String(120))
+    model: Mapped[str] = mapped_column(String(255))
     encrypted_api_key: Mapped[str] = mapped_column(Text)
     session_hash: Mapped[str | None] = mapped_column(String(64))
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)

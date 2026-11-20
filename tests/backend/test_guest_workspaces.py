@@ -180,7 +180,7 @@ def test_llm_configuration_is_encrypted_and_workspace_scoped(setup, monkeypatch,
     invalid = left.put("/api/v1/llm/config", json=OPENAI | {"api_key": "invalid-secret"})
     assert invalid.status_code == 422 and invalid.json()["error"] == "llm_invalid_key"
     assert "invalid-secret" not in invalid.text + caplog.text
-    assert left.put("/api/v1/llm/config", json=OPENAI | {"model": "not-supported"}).json()["error"] == "llm_model_unsupported"
+    assert left.put("/api/v1/llm/config", json=OPENAI | {"model": "invalid model"}).status_code == 422
 
     saved = left.put("/api/v1/llm/config", json=OPENAI)
     assert saved.status_code == 200, saved.text
@@ -203,7 +203,7 @@ def test_llm_configuration_is_encrypted_and_workspace_scoped(setup, monkeypatch,
     assert ("analyze", "openai", OPENAI["model"], OPENAI["api_key"]) in calls
     assert ("analyze", "gemini", GEMINI["model"], GEMINI["api_key"]) in calls
 
-    changed = left.put("/api/v1/llm/config", json=OPENAI | {"model": "gpt-4o-mini", "api_key": "timeout-secret"})
+    changed = left.put("/api/v1/llm/config", json=OPENAI | {"id": saved.json()["data"]["id"], "model": "gpt-4o-mini", "api_key": "timeout-secret"})
     assert changed.status_code == 200
     failed = left.post(a)
     assert failed.status_code == 504 and failed.json()["error"] == "llm_timeout"

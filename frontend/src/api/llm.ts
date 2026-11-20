@@ -1,8 +1,11 @@
 import { apiClient } from "./client";
 import type { ApiResponse } from "../types/api";
 
-export type Provider = "openai" | "gemini";
+export type Provider = "openai" | "gemini" | "openrouter" | "anthropic" | "groq" | "custom";
 export type LLMStatus = {
+  id?: string;
+  active?: boolean;
+  base_url?: string;
   configured: boolean;
   provider: Provider | null;
   model: string | null;
@@ -11,8 +14,8 @@ export type LLMStatus = {
   remember: boolean;
   expires_at: string | null;
 };
-export type LLMSelection = { provider: Provider; model: string; api_key?: string };
-export const providerNames = { openai: "OpenAI", gemini: "Google Gemini" } as const;
+export type LLMSelection = { provider: Provider; model: string; api_key?: string; id?: string; base_url?: string };
+export const providerNames = { openrouter: "OpenRouter", gemini: "Google Gemini", openai: "OpenAI", anthropic: "Anthropic", groq: "Groq", custom: "Custom endpoint" } as const;
 export type ProviderCatalog = Record<Provider, string[]>;
 const LLM_READ_TIMEOUT_MS = 12_000;
 
@@ -20,7 +23,7 @@ function readStatus(response: ApiResponse<LLMStatus>) {
   const status = response?.data;
   if (response?.success !== true || typeof status?.configured !== "boolean"
     || typeof status.has_api_key !== "boolean"
-    || (status.provider !== null && status.provider !== "openai" && status.provider !== "gemini")) {
+    || (status.provider !== null && !(status.provider in providerNames))) {
     throw new Error("The LLM configuration endpoint returned an unexpected response.");
   }
   return status;
@@ -56,7 +59,22 @@ export async function saveLLM(selection: LLMSelection & { remember: boolean }) {
   return readStatus((await apiClient.put<ApiResponse<LLMStatus>>("/llm/config", selection)).data);
 }
 
-export async function removeLLM() {
-  const response = await apiClient.delete("/llm/config");
+export async function removeLLM(id?: string) {
+  const response = await apiClient.delete("/llm/config", { params: { id } });
   if (response.status !== 204) throw new Error("The configuration removal endpoint returned an unexpected response.");
+}
+
+export async function listLLM(signal?: AbortSignal) {
+  const response = (await apiClient.get<ApiResponse<LLMStatus[]>>("/llm/configs", { signal })).data;
+  if (!response.success || !Array.isArray(response.data)) throw new Error("Unable to read saved configurations. Retry workspace setup.");
+  return response.data;
+}
+export async function activateLLM(id: string) {
+  return readStatus((await apiClient.post(`/llm/configs/${id}/activate`)).data);
+}
+export async function discoverLLM(selection: Omit<LLMSelection, "model">, signal?: AbortSignal) {
+  const response = (await apiClient.post<ApiResponse<{source: string; models: string[]}>>("/llm/models", selection, {signal})).data;
+  if (!response.success || !Array.isArray(response.data?.models) || !response.data.models.every((model) => typeof model === "string"))
+    throw new Error("The provider returned an invalid model list. Retry or enter a model ID manually.");
+  return response.data.models;
 }

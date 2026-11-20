@@ -157,7 +157,7 @@ class Settings(BaseSettings):
     @classmethod
     def parse_models(cls, value: Any) -> list[str]:
         models = list(dict.fromkeys(_parse_csv(value)))
-        if not models or any(not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,119}", model) for model in models):
+        if not models or any(not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/+@-]{0,254}", model) for model in models):
             raise ValueError("Model lists must contain valid provider model identifiers.")
         return models
 
@@ -202,11 +202,6 @@ class Settings(BaseSettings):
         hosted = os.environ.get("VERCEL") == "1"
         if hosted and not self.is_production:
             issues.append("Set ENVIRONMENT=production on the Vercel backend.")
-        if self.storage_provider == "s3":
-            required = ("storage_bucket", "storage_region", "storage_access_key_id", "storage_secret_access_key")
-            missing = [field.upper() for field in required if not (getattr(self, field) or "").strip()]
-            if missing:
-                issues.append(f"S3 storage requires {', '.join(missing)}.")
         if self.llm_encryption_key:
             try:
                 Fernet(self.llm_encryption_key.encode())
@@ -217,6 +212,15 @@ class Settings(BaseSettings):
         if issues:
             raise PydanticCustomError("deployment_settings", "{issues}", {"issues": " ".join(issues)})
         return self
+
+    def storage_issues(self) -> list[str]:
+        issues = []
+        if self.storage_provider == "s3":
+            required = ("storage_bucket", "storage_region", "storage_access_key_id", "storage_secret_access_key")
+            missing = [field.upper() for field in required if not (getattr(self, field) or "").strip()]
+            if missing:
+                issues.append(f"S3 storage requires {', '.join(missing)}.")
+        return issues
 
     def _production_issues(self) -> list[str]:
         issues = []

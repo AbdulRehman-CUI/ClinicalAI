@@ -18,3 +18,24 @@ async def health_check() -> ApiResponse[HealthCheck]:
         pagination=None,
     )
 
+
+@router.get("/readiness")
+def readiness():
+    """Configuration and schema readiness, without credentials or provider calls."""
+    from app.core.config import get_settings
+    from app.db.session import engine
+    from sqlalchemy import text
+    from fastapi.responses import JSONResponse
+    issues = get_settings().storage_issues()
+    database_ready = False
+    try:
+        with engine.connect() as connection:
+            database_ready = connection.execute(text("SELECT version_num FROM alembic_version")).scalar() == "20261120_0001"
+    except Exception:
+        pass
+    ready = not issues and database_ready
+    return JSONResponse(status_code=200 if ready else 503, content={
+        "ready": ready,
+        "storage": {"configured": not issues, "issues": issues},
+        "database": {"ready": database_ready, "message": "Schema current" if database_ready else "Check database connectivity and run Alembic upgrade head."},
+    })

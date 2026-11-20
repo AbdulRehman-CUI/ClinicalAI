@@ -13,7 +13,7 @@ const WORKSPACE_TIMEOUT_MS = 12_000;
 let workspaceReady: Promise<void> | undefined;
 
 function isPublicRequest(url?: string) {
-  return url === "/workspace" || url === "/health" || url === "/llm/providers";
+  return url === "/workspace" || url === "/health" || url === "/llm/providers" || url === "/llm/metadata";
 }
 
 async function initializeWorkspace() {
@@ -53,9 +53,14 @@ apiClient.interceptors.request.use(async (request) => {
   return request;
 });
 
-apiClient.interceptors.response.use(undefined, (error: unknown) => {
+apiClient.interceptors.response.use(undefined, async (error: unknown) => {
   if (axios.isAxiosError(error) && error.response?.status === 401 && !isPublicRequest(error.config?.url)) {
     workspaceReady = undefined;
+    const request = error.config as typeof error.config & { workspaceRetried?: boolean };
+    if (request && !request.workspaceRetried) {
+      request.workspaceRetried = true;
+      return apiClient.request(request);
+    }
   }
   return Promise.reject(error);
 });

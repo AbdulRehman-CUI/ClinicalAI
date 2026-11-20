@@ -46,10 +46,11 @@ class LocalReportStorage:
 
 class S3ReportStorage:
     def __init__(self) -> None:
+        settings = get_settings()
+        if settings.storage_issues():
+            raise StorageUnavailableError("Report storage is not configured. Contact your administrator.")
         import boto3
         from botocore.config import Config
-
-        settings = get_settings()
         self.bucket = settings.storage_bucket
         self.client = boto3.client(
             "s3",
